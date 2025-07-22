@@ -55,7 +55,7 @@ pub fn build(b: *std.Build) void {
             }
 
             exe.root_module.sanitize_c = true; // AddressSanitizer + UBSan + LeakSanitizer
-            exe.root_module.stack_protector = true; // Stack canaries to detect buffer overflows
+            //exe.root_module.stack_protector = true; // TODO: Window needs libc. Stack canaries to detect buffer overflows
             exe.root_module.error_tracing = true; // Enhanced error stack traces
             exe.root_module.single_threaded = false; // Single-threaded optimizations
             exe.root_module.strip = true; // Keep debug symbols
