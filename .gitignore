@@ -1,0 +1,15 @@
+
+# macOS
+.DS_Store
+
+# IDE/Editor  
+.vscode/
+
+# Custom
+.ignore
+
+# Zig
+.zig-cache/
+zig-out/
+debug/
+release/
