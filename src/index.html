@@ -163,12 +163,21 @@
         function callInstall() {
             if (wasmExports) {
                 const url = document.getElementById('install-url').value;
-                const urlBytes = new TextEncoder().encode(url);
+                if (wasmExports.install_externref) {         
+                    log(Channel.JS, Level.SUCCESS, 'Using externref method (no heap allocation)');
+                    
+                    // Pass the js-string directly as externref
+                    wasmExports.install_externref(url);
+                } else {
+                    log(Channel.JS, Level.WARN, 'Externref not available, using heap allocation');
+
+                    const urlBytes = new TextEncoder().encode(url);
                 
-                const ptr = wasmExports.allocate(urlBytes.length);
-                if (ptr) {
-                    new Uint8Array(wasmExports.memory.buffer).set(urlBytes, ptr);
-                    wasmExports.install(ptr, urlBytes.length);
+                    const ptr = wasmExports.allocate(urlBytes.length);
+                    if (ptr) {
+                        new Uint8Array(wasmExports.memory.buffer).set(urlBytes, ptr);
+                        wasmExports.install(ptr, urlBytes.length);
+                    }
                 }
             }
         }
@@ -208,10 +217,17 @@
                     }
                 };
 
+                // Enable JS builtins for externref support
+                const compileOptions = {
+                    builtins: ["js-string", "text-encoder"]
+                };
+
                 const wasmModule = await WebAssembly.instantiateStreaming(
                     fetch('./star.wasm'),
-                    importObject
+                    importObject,
+                    compileOptions
                 );
+
                 wasmExports = wasmModule.instance.exports;
                 log(Channel.JS, Level.INFO, 'WASM reloaded at ' + new Date().toLocaleTimeString());
                 

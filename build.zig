@@ -69,26 +69,33 @@ pub fn build(b: *std.Build) void {
             });
 
             // Add WASM build for debug
+            const debug_wasm_target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+                .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{
+                    .reference_types,
+                    .bulk_memory,
+                }),
+            });
+
             const debug_wasm = b.addExecutable(.{
                 .name = "star",
                 .root_module = b.createModule(.{
                     .root_source_file = b.path("src/wasm.zig"),
-                    .target = b.resolveTargetQuery(.{
-                        .cpu_arch = .wasm32,
-                        .os_tag = .freestanding,
-                    }),
+                    .target = debug_wasm_target,
                     .optimize = optimize,
                 }),
             });
 
             debug_wasm.rdynamic = true;
             debug_wasm.root_module.addImport("runtime", runtime_module);
+            debug_wasm.addCSourceFile(.{ .file = b.path("src/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
 
             const debug_wasm_install = b.addInstallArtifact(debug_wasm, .{
                 .dest_dir = .{ .override = .{ .custom = b.fmt("./{s}", .{platform.folder_name}) } },
             });
 
-            // const debug_star_json_install = b.addInstallFile(b.path("star.json"), b.fmt("{s}/workspace/star/star.json", .{platform.folder_name}));
+            // const debug_star_json_install = b.addInstallFile(b.pfsath("star.json"), b.fmt("{s}/workspace/star/star.json", .{platform.folder_name}));
             // debug_star_json_install.step.dependOn(&debug_install.step);
 
             // Only copy star.global.json, not the entire runtime directory
@@ -141,20 +148,27 @@ pub fn build(b: *std.Build) void {
         });
 
         // Add WASM build for release
+        const release_wasm_target = b.resolveTargetQuery(.{
+            .cpu_arch = .wasm32,
+            .os_tag = .freestanding,
+            .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{
+                .reference_types,
+                .bulk_memory,
+            }),
+        });
+
         const release_wasm = b.addExecutable(.{
             .name = "star",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/wasm.zig"),
-                .target = b.resolveTargetQuery(.{
-                    .cpu_arch = .wasm32,
-                    .os_tag = .freestanding,
-                }),
+                .target = release_wasm_target,
                 .optimize = .ReleaseSmall,
             }),
         });
 
         release_wasm.rdynamic = true;
         release_wasm.root_module.addImport("runtime", runtime_module);
+        release_wasm.addCSourceFile(.{ .file = b.path("src/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
 
         const release_wasm_install = b.addInstallArtifact(release_wasm, .{
             .dest_dir = .{ .override = .{ .custom = b.fmt("../release/{s}", .{platform.folder_name}) } },
