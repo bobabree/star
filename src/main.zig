@@ -10,7 +10,7 @@ pub fn main() !void {
     if (builtin.target.cpu.arch == .wasm32) return;
 
     // Single FBA for everything
-    var buffer: [8 * 1024 * 1024]u8 = undefined; // 8MB buffer
+    var buffer: [2 * 1024 * 1024]u8 = undefined;
     var fba = Heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 

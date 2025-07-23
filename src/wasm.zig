@@ -71,3 +71,8 @@ test "add function works" {
     try Testing.expect(add(2, 3) == 5);
     try Testing.expect(add(-1, 1) == 0);
 }
+
+test "add function works2" {
+    try Testing.expect(add(2, 3) == 5);
+    try Testing.expect(add(-1, 1) == 0);
+}
