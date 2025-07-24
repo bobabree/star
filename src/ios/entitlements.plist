@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>application-identifier</key>
+    <string>TEAMID.com.example.starapp</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>TEAMID</string>
+    <key>get-task-allow</key>
+    <true/>
+</dict>
+</plist>

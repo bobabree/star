@@ -19,6 +19,11 @@ pub fn build(b: *std.Build) void {
         .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .windows }, .folder_name = "star-win-arm64" },
         .{ .target = .{ .cpu_arch = .wasm32, .os_tag = .freestanding }, .folder_name = "star-wasm" },
         // TODO: .{ .target = .{ .cpu_arch = .wasm32, .os_tag = .wasi, .abi = .musl }, .folder_name = "star-wasi" },
+
+        // iOS targets
+        .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .ios }, .folder_name = "star-ios" },
+        //.{ .target = .{ .cpu_arch = .x86_64, .os_tag = .ios, .abi = .macabi }, .folder_name = "star-ios-sim-intel" },
+        //.{ .target = .{ .cpu_arch = .aarch64, .os_tag = .ios, .abi = .simulator }, .folder_name = "star-ios-sim" },
     };
 
     const test_step = b.step("test", "Run unit tests");
@@ -92,7 +97,7 @@ fn createPlatformArtifacts(
         .unwind_tables = .sync,
     });
 
-    const web_module = b.createModule(.{
+    const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -127,21 +132,67 @@ fn createPlatformArtifacts(
         },
     });
 
-    const web_exe = b.addExecutable(.{ .name = "star", .root_module = web_module });
-    const web_wasm = b.addExecutable(.{ .name = "star", .root_module = wasm_module });
+    const exe = b.addExecutable(.{ .name = "star", .root_module = exe_module });
+    const wasm = b.addExecutable(.{ .name = "star", .root_module = wasm_module });
 
     const is_current_platform = target.result.os.tag == builtin.target.os.tag;
-    // and target.result.cpu.arch == builtin.target.cpu.arch;
     // apparently zig can run tests on different CPU architectures 🤷🏻‍♀️
-    // const is_wasm = target.result.cpu.arch != .wasm32;
 
-    if (is_current_platform) {
+    const is_ios = platform.target.os_tag == .ios;
+    if (is_ios) {
+        // Prerequisites:
+        // brew install ios-deploy (for ios-sim)
+        // brew install libimobiledevice ideviceinstaller (for device communication)
+
+        // Get SDK path
+        var sdk_path: []const u8 = undefined;
+        if (b.sysroot) |sysroot| {
+            sdk_path = sysroot;
+        } else {
+            const result = std.process.Child.run(.{
+                .allocator = b.allocator,
+                .argv = &.{ "xcrun", "--show-sdk-path", "--sdk", "iphoneos" },
+            }) catch |err| {
+                std.log.err("Failed to run xcrun: {}", .{err});
+                @panic("iOS development requires Xcode Command Line Tools. Run: xcode-select --install");
+            };
+
+            if (result.term.Exited != 0) {
+                std.log.err("xcrun failed: {s}", .{result.stderr});
+                @panic("Could not find iOS SDK. Make sure Xcode Command Line Tools are installed.");
+            }
+
+            sdk_path = std.mem.trim(u8, result.stdout, " \n\r\t");
+            //std.log.info("Using iOS SDK: {s}", .{sdk_path});
+        }
+
+        exe.addSystemFrameworkPath(.{ .cwd_relative = b.fmt("{s}/System/Library/Frameworks", .{sdk_path}) });
+        exe.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sdk_path}) });
+        exe.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sdk_path}) });
+
+        exe.linkLibC();
+        exe.linkFramework("Foundation");
+        exe.linkFramework("UIKit");
+
+        const ios_install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = b.fmt("{s}/StarApp.app", .{folder_name}) } } });
+
+        // install Info.plist from source file
+        const plist_install = b.addInstallFile(b.path("src/ios/Info.plist"), b.fmt("{s}/StarApp.app/Info.plist", .{folder_name}));
+
+        plist_install.step.dependOn(&ios_install.step);
+
+        if (install_step) |step| {
+            step.dependOn(&plist_install.step);
+        }
+
+        return;
+    } else if (is_current_platform) {
         // Only create tests for CURRENT platform
         const test_exe = b.addTest(.{ .root_module = runtime_module });
         if (target.result.os.tag == .windows) {
             const libs = &[_][]const u8{ "ws2_32", "kernel32", "ntdll", "crypt32", "advapi32" };
             for (libs) |lib| {
-                web_exe.linkSystemLibrary(lib);
+                exe.linkSystemLibrary(lib);
                 test_exe.linkSystemLibrary(lib);
             }
         }
@@ -151,26 +202,26 @@ fn createPlatformArtifacts(
         if (platform.target.os_tag == .windows) {
             const libs = &[_][]const u8{ "ws2_32", "kernel32", "ntdll", "crypt32", "advapi32" };
             for (libs) |lib| {
-                web_exe.linkSystemLibrary(lib);
+                exe.linkSystemLibrary(lib);
             }
         }
     }
 
     // WASM-specific setup
-    web_wasm.rdynamic = true;
-    web_wasm.addCSourceFile(.{ .file = b.path("src/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
+    wasm.rdynamic = true;
+    wasm.addCSourceFile(.{ .file = b.path("src/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
 
     if (platform.use_static) {
-        web_exe.linkage = .static;
-        web_wasm.linkage = .static;
+        exe.linkage = .static;
+        wasm.linkage = .static;
     }
 
     // Install artifacts
-    const web_install = b.addInstallArtifact(web_exe, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
-    const wasm_install = b.addInstallArtifact(web_wasm, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
+    const exe_install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
+    const wasm_install = b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
 
     if (install_step) |step| {
-        step.dependOn(&web_install.step);
+        step.dependOn(&exe_install.step);
         step.dependOn(&wasm_install.step);
     }
 }

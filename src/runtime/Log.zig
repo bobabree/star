@@ -5,6 +5,7 @@ const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 const is_wasm = builtin.target.cpu.arch == .wasm32;
+const is_ios = builtin.target.os.tag == .ios;
 
 // Externs for WASM
 extern fn log_error(ptr: [*]const u8, len: usize) void;
@@ -24,6 +25,7 @@ const LogColor = struct {
     pub const debug_color = "\x1b[1;30m";
 };
 
+pub const ios_log = scoped(.ios);
 pub const server_log = scoped(.server);
 pub const wasm_log = scoped(.wasm);
 pub const default_log = scoped(.default);
@@ -115,6 +117,7 @@ const ScopeLevel = struct {
 };
 
 const scope_levels: []const ScopeLevel = &.{
+    .{ .scope = .ios, .level = .debug },
     .{ .scope = .server, .level = .debug },
     .{ .scope = .wasm, .level = .debug },
 };
@@ -146,7 +149,7 @@ fn logFn(
     // Ignore all non-error logging from sources other than the declared scopes
     const scope_prefix = "[" ++ switch (scope) {
         .default => "",
-        .server, .wasm => @tagName(scope),
+        .ios, .server, .wasm => @tagName(scope),
         else => if (@intFromEnum(message_level) <= @intFromEnum(Level.err))
             @tagName(scope)
         else
