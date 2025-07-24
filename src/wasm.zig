@@ -11,10 +11,6 @@ var buffer: [1024]u8 = undefined;
 var fba: FixedBufferAllocator = undefined;
 var allocator: Allocator = undefined;
 
-// Import JS string builtins
-const RefType = @import("std").wasm.RefType;
-const externref = RefType.externref;
-
 export fn _start() void {
     fba = FixedBufferAllocator.init(&buffer);
     allocator = fba.allocator();
@@ -61,18 +57,14 @@ export fn install(url_ptr: [*]const u8, url_len: usize) void {
 
 export fn zig_install_externref(url_ptr: [*]const u8, length: i32) void {
     const url_slice = url_ptr[0..@intCast(length)];
-    wasm_log.info("📦 Install package from URL: {s}", .{url_slice});
+    const url = Utf8Buffer(256).copy(url_slice).constSlice();
+    wasm_log.info("📦 Install package from URL: {s}", .{url});
     wasm_log.info("📦 Install package from externref URL (length: {} chars)", .{length});
 }
 
 const Testing = runtime.Testing;
 
 test "add function works" {
-    try Testing.expect(add(2, 3) == 5);
-    try Testing.expect(add(-1, 1) == 0);
-}
-
-test "add function works2" {
     try Testing.expect(add(2, 3) == 5);
     try Testing.expect(add(-1, 1) == 0);
 }

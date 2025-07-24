@@ -7,7 +7,7 @@ const Process = runtime.Process;
 const Server = runtime.server.Server;
 const Log = runtime.Log;
 
-const is_wasm = builtin.target.cpu.arch == .wasm32;
+const is_wasm = builtin.target.cpu.arch.isWasm();
 const is_ios = builtin.target.os.tag == .ios;
 
 pub fn main() !void {

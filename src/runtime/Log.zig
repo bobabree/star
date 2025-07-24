@@ -4,7 +4,7 @@ const IO = @import("IO.zig");
 const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
-const is_wasm = builtin.target.cpu.arch == .wasm32;
+const is_wasm = builtin.target.cpu.arch.isWasm();
 const is_ios = builtin.target.os.tag == .ios;
 
 // Externs for WASM
@@ -34,8 +34,7 @@ fn err(message: []const u8) void {
     if (is_wasm) {
         log_error(message.ptr, message.len);
     } else {
-        const stderr = IO.getStdErr().writer();
-        stderr.print(LogColor.err_color ++ "{s}" ++ LogColor.reset, .{message}) catch return;
+        Debug.print(LogColor.err_color ++ "{s}" ++ LogColor.reset, .{message});
     }
 }
 
@@ -43,8 +42,7 @@ fn success(message: []const u8) void {
     if (is_wasm) {
         log_success(message.ptr, message.len);
     } else {
-        const stderr = IO.getStdErr().writer();
-        stderr.print(LogColor.success_color ++ "{s}" ++ LogColor.reset, .{message}) catch return;
+        Debug.print(LogColor.success_color ++ "{s}" ++ LogColor.reset, .{message});
     }
 }
 
@@ -52,8 +50,7 @@ fn warn(message: []const u8) void {
     if (is_wasm) {
         log_warn(message.ptr, message.len);
     } else {
-        const stderr = IO.getStdErr().writer();
-        stderr.print(LogColor.warn_color ++ "{s}" ++ LogColor.reset, .{message}) catch return;
+        Debug.print(LogColor.warn_color ++ "{s}" ++ LogColor.reset, .{message});
     }
 }
 
@@ -61,8 +58,7 @@ fn info(message: []const u8) void {
     if (is_wasm) {
         log_info(message.ptr, message.len);
     } else {
-        const stderr = IO.getStdErr().writer();
-        stderr.print(LogColor.info_color ++ "{s}" ++ LogColor.reset, .{message}) catch return;
+        Debug.print(LogColor.info_color ++ "{s}" ++ LogColor.reset, .{message});
     }
 }
 
@@ -70,8 +66,7 @@ fn debug(message: []const u8) void {
     if (is_wasm) {
         log_debug(message.ptr, message.len);
     } else {
-        const stderr = IO.getStdErr().writer();
-        stderr.print(LogColor.debug_color ++ "{s}" ++ LogColor.reset, .{message}) catch return;
+        Debug.print(LogColor.debug_color ++ "{s}" ++ LogColor.reset, .{message});
     }
 }
 
@@ -80,8 +75,7 @@ pub fn newLine() void {
     if (is_wasm) {
         log_info(message.ptr, message.len);
     } else {
-        const stderr = IO.getStdErr().writer();
-        stderr.print(message, .{}) catch return;
+        Debug.print(message, .{});
     }
 }
 

@@ -20,7 +20,7 @@ pub const wasm = @import("wasm.zig");
 pub const server = @import("server.zig");
 
 // Embed files
-pub const html_content = @embedFile("index.html");
+pub const html_content = @embedFile("web/index.html");
 
 // Tests
 test {

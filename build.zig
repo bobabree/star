@@ -18,7 +18,6 @@ pub fn build(b: *std.Build) void {
         .{ .target = .{ .cpu_arch = .x86_64, .os_tag = .windows }, .folder_name = "star-win" },
         .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .windows }, .folder_name = "star-win-arm64" },
         .{ .target = .{ .cpu_arch = .wasm32, .os_tag = .freestanding }, .folder_name = "star-wasm" },
-        // TODO: .{ .target = .{ .cpu_arch = .wasm32, .os_tag = .wasi, .abi = .musl }, .folder_name = "star-wasi" },
 
         // iOS targets
         .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .ios }, .folder_name = "star-ios" },
@@ -90,7 +89,7 @@ fn createPlatformArtifacts(
         .root_source_file = b.path("src/runtime.zig"),
         .target = target,
         .optimize = optimize,
-        .sanitize_c = optimize == .Debug,
+        .sanitize_c = .full,
         .error_tracing = optimize == .Debug,
         .single_threaded = false,
         .strip = optimize != .Debug, // Strip for release builds
@@ -101,7 +100,7 @@ fn createPlatformArtifacts(
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .sanitize_c = optimize == .Debug,
+        .sanitize_c = .full,
         .error_tracing = optimize == .Debug,
         .single_threaded = false,
         .strip = optimize != .Debug,
@@ -119,10 +118,11 @@ fn createPlatformArtifacts(
             .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{
                 .reference_types,
                 .bulk_memory,
+                .atomics,
             }),
         }),
         .optimize = optimize,
-        .sanitize_c = optimize == .Debug, // Only for debug
+        .sanitize_c = .full, // Only for debug
         .error_tracing = optimize == .Debug,
         .single_threaded = false,
         .strip = optimize != .Debug,
@@ -177,6 +177,7 @@ fn createPlatformArtifacts(
         const ios_install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = b.fmt("{s}/StarApp.app", .{folder_name}) } } });
 
         // install Info.plist from source file
+        // TODO: remove this and use embedFile like index.html instead
         const plist_install = b.addInstallFile(b.path("src/ios/Info.plist"), b.fmt("{s}/StarApp.app/Info.plist", .{folder_name}));
 
         plist_install.step.dependOn(&ios_install.step);
@@ -209,7 +210,7 @@ fn createPlatformArtifacts(
 
     // WASM-specific setup
     wasm.rdynamic = true;
-    wasm.addCSourceFile(.{ .file = b.path("src/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
+    wasm.addCSourceFile(.{ .file = b.path("src/web/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
 
     if (platform.use_static) {
         exe.linkage = .static;
