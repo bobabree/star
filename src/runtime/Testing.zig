@@ -9,10 +9,10 @@ pub const refAllDeclsRecursive = testing.refAllDeclsRecursive;
 pub const refAllDecls = testing.refAllDecls;
 
 const builtin = @import("builtin");
+const Debug = @import("Debug.zig");
 const Heap = @import("Heap.zig");
 const Mem = @import("Mem.zig");
 const Time = @import("Time.zig");
-const default_log = @import("Log.zig").default_log;
 
 pub const ProfiledTest = struct {
     name: []const u8,
@@ -72,11 +72,11 @@ pub const ProfiledTest = struct {
 
         if (self.fba) |fba| {
             const memory_used = fba.end_index - (self.start_memory orelse 0);
-            default_log.info("\n[{s:<40}]", .{self.name});
+            Debug.default.info("\n[{s:<40}]", .{self.name});
             printTimeBreakdown(" ⏱️ Time: ", elapsed_ns);
             printMemoryBreakdown(" 💾 Memory: ", memory_used);
         } else {
-            default_log.info("\n[{s:<40}]", .{self.name});
+            Debug.default.info("\n[{s:<40}]", .{self.name});
             printTimeBreakdown(" ⏱️ Time: ", elapsed_ns);
         }
     }
@@ -88,7 +88,7 @@ pub const ProfiledTest = struct {
         const ns = remaining_after_ms % 1_000;
 
         // TODO: Thresholds for info/warn/err/success
-        default_log.debug("{s:<15}{d:>3}ms {d:>3}μs {d:>3}ns", .{ prefix, ms, us, ns });
+        Debug.default.debug("{s:<15}{d:>3}ms {d:>3}μs {d:>3}ns", .{ prefix, ms, us, ns });
     }
 
     pub fn printMemoryBreakdown(prefix: []const u8, total_bytes: usize) void {
@@ -98,6 +98,6 @@ pub const ProfiledTest = struct {
         const bytes = remaining_after_mb % 1024;
 
         // TODO: Thresholds for info/warn/err/success
-        default_log.debug("{s:<15}{d:>3}MB {d:>3}KB {d:>3}B", .{ prefix, mb, kb, bytes });
+        Debug.default.debug("{s:<15}{d:>3}MB {d:>3}KB {d:>3}B", .{ prefix, mb, kb, bytes });
     }
 };

@@ -3,6 +3,7 @@ const runtime = @import("runtime.zig");
 
 const builtin = runtime.builtin;
 const Atomic = runtime.Atomic;
+const Debug = runtime.Debug;
 const Fs = runtime.Fs;
 const Http = runtime.Http;
 const Heap = runtime.Heap;
@@ -11,7 +12,6 @@ const Net = runtime.Net;
 const Process = runtime.Process;
 const Thread = runtime.Thread;
 const Time = runtime.Time;
-const server_log = runtime.Log.server_log;
 
 // Embed HTML
 const html_content = runtime.html_content;
@@ -81,22 +81,22 @@ pub const HotReloader = struct {
     }
 
     fn rebuild(self: *HotReloader) void {
-        server_log.info("🔄 Rebuilding...\n", .{});
+        Debug.server.info("🔄 Rebuilding...\n", .{});
 
         const result = Process.Child.run(.{
             .allocator = self.allocator,
             .argv = self.rebuild_cmd,
         }) catch {
-            server_log.err("❌ Build failed\n", .{});
+            Debug.server.err("❌ Build failed\n", .{});
             return;
         };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
 
         if (result.term == .Exited and result.term.Exited == 0) {
-            server_log.success("✅ Build complete\n", .{});
+            Debug.server.success("✅ Build complete\n", .{});
         } else {
-            server_log.err("❌ Build failed: {s}\n", .{result.stderr});
+            Debug.server.err("❌ Build failed: {s}\n", .{result.stderr});
         }
     }
 };
@@ -119,18 +119,18 @@ pub const Server = struct {
         const address = try Net.Address.parseIp4("127.0.0.1", 8080);
         var server = try address.listen(.{ .reuse_address = true });
 
-        server_log.info("🚀 Zig HTTP Server running at http://127.0.0.1:8080\n", .{});
-        server_log.info("📁 Serving files from current directory\n", .{});
-        server_log.info("🛑 Press Ctrl+C to stop\n\n", .{});
+        Debug.server.info("🚀 Zig HTTP Server running at http://127.0.0.1:8080\n", .{});
+        Debug.server.info("📁 Serving files from current directory\n", .{});
+        Debug.server.info("🛑 Press Ctrl+C to stop\n\n", .{});
 
         while (true) {
             const connection = server.accept() catch |err| {
-                server_log.err("❌ Error accepting connection: {}\n", .{err});
+                Debug.server.err("❌ Error accepting connection: {}\n", .{err});
                 continue;
             };
 
             self.handleConnection(connection) catch |err| {
-                server_log.err("❌ Error handling connection: {}\n", .{err});
+                Debug.server.err("❌ Error handling connection: {}\n", .{err});
             };
         }
 
@@ -144,7 +144,7 @@ pub const Server = struct {
         var http_server = Http.Server.init(connection, &buffer);
 
         var request = http_server.receiveHead() catch |err| {
-            server_log.err("❌ Error receiving request head: {}\n", .{err});
+            Debug.server.err("❌ Error receiving request head: {}\n", .{err});
             return;
         };
 
@@ -158,7 +158,7 @@ pub const Server = struct {
 
         // Only log non-HEAD requests
         if (request.head.method != .HEAD) {
-            server_log.info("📨 {any} {s}\n", .{ request.head.method, target });
+            Debug.server.info("📨 {any} {s}\n", .{ request.head.method, target });
         }
 
         // Route handling with cleaned target
@@ -182,7 +182,7 @@ pub const Server = struct {
     fn serveWasm(allocator: Mem.Allocator, request: *Http.Server.Request) !void {
         var exe_dir_path_buf: [Fs.max_path_bytes]u8 = undefined;
         const exe_dir_path = Fs.selfExeDirPath(&exe_dir_path_buf) catch {
-            server_log.err("❌ Failed to get executable directory\n", .{});
+            Debug.server.err("❌ Failed to get executable directory\n", .{});
             try serve404(request);
             return;
         };
@@ -191,7 +191,7 @@ pub const Server = struct {
         defer allocator.free(wasm_path);
 
         const wasm_data = Fs.cwd().readFileAlloc(allocator, wasm_path, 10_000_000) catch |err| {
-            server_log.err("❌ Failed to read WASM file: {}\n", .{err});
+            Debug.server.err("❌ Failed to read WASM file: {}\n", .{err});
             try serve404(request);
             return;
         };
@@ -209,7 +209,7 @@ pub const Server = struct {
         });
 
         if (request.head.method != .HEAD) {
-            server_log.info("Served WASM ({d:.2} MB)\n", .{size_mb});
+            Debug.server.info("Served WASM ({d:.2} MB)\n", .{size_mb});
         }
     }
 

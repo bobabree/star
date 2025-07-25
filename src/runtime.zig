@@ -7,7 +7,6 @@ pub const Fs = @import("runtime/Fs.zig");
 pub const Heap = @import("runtime/Heap.zig");
 pub const Http = @import("runtime/Http.zig");
 pub const IO = @import("runtime/IO.zig");
-pub const Log = @import("runtime/Log.zig");
 pub const Mem = @import("runtime/Mem.zig");
 pub const Net = @import("runtime/Net.zig");
 pub const Process = @import("runtime/Process.zig");

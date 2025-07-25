@@ -5,7 +5,6 @@ const Debug = runtime.Debug;
 const FixedBufferAllocator = runtime.Heap.FixedBufferAllocator;
 const Mem = runtime.Mem;
 const Utf8Buffer = runtime.Utf8Buffer.Utf8Buffer;
-const wasm_log = runtime.Log.wasm_log;
 
 var buffer: [1024]u8 = undefined;
 var fba: FixedBufferAllocator = undefined;
@@ -15,26 +14,26 @@ export fn _start() void {
     fba = FixedBufferAllocator.init(&buffer);
     allocator = fba.allocator();
 
-    wasm_log.info("WASM module initialized!", .{});
+    Debug.wasm.info("WASM module initialized!", .{});
 }
 
 export fn runTests() void {
     //TODO: somehow link with Testing framework
     const result1 = add(2, 3);
     if (result1 == 5) {
-        wasm_log.success("✅ Test 1 passed: add(2, 3) = x5", .{});
+        Debug.wasm.success("✅ Test 1 passed: add(2, 3) = x5", .{});
     } else {
-        wasm_log.err("❌ Test 1 failed: add(2, 3) != 5", .{});
+        Debug.wasm.err("❌ Test 1 failed: add(2, 3) != 5", .{});
     }
 
     const result2 = add(-1, 1);
     if (result2 == 0) {
-        wasm_log.success("✅ Test 2 passed: add(-1, 1) = 0", .{});
+        Debug.wasm.success("✅ Test 2 passed: add(-1, 1) = 0", .{});
     } else {
-        wasm_log.err("❌ Test 2 failed: add(-1, 1) != 0", .{});
+        Debug.wasm.err("❌ Test 2 failed: add(-1, 1) != 0", .{});
     }
 
-    wasm_log.info("Tests completed", .{});
+    Debug.wasm.info("Tests completed", .{});
 }
 
 export fn add(a: i32, b: i32) i32 {
@@ -44,7 +43,7 @@ export fn add(a: i32, b: i32) i32 {
 export fn allocate(size: usize) [*]u8 {
     const memory = allocator.alloc(u8, size) catch |err| {
         // TODO: Panic shown on js side
-        Debug.panic("allocate failed with error {}: size {}", .{ err, size });
+        Debug.wasm.panic("allocate failed with error {}: size {}", .{ err, size });
     };
     return memory.ptr;
 }
@@ -52,14 +51,14 @@ export fn allocate(size: usize) [*]u8 {
 export fn install(url_ptr: [*]const u8, url_len: usize) void {
     const url_slice = url_ptr[0..url_len];
     var url_buf = Utf8Buffer(2048).copy(url_slice);
-    wasm_log.info("Install called with URL: {s}", .{url_buf.constSlice()});
+    Debug.wasm.info("Install called with URL: {s}", .{url_buf.constSlice()});
 }
 
 export fn zig_install_externref(url_ptr: [*]const u8, length: i32) void {
     const url_slice = url_ptr[0..@intCast(length)];
     const url = Utf8Buffer(256).copy(url_slice).constSlice();
-    wasm_log.info("📦 Install package from URL: {s}", .{url});
-    wasm_log.info("📦 Install package from externref URL (length: {} chars)", .{length});
+    Debug.wasm.info("📦 Install package from URL: {s}", .{url});
+    Debug.wasm.info("📦 Install package from externref URL (length: {} chars)", .{length});
 }
 
 const Testing = runtime.Testing;

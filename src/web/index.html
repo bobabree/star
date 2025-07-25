@@ -99,16 +99,17 @@
             Level[level.name.toUpperCase()] = index;
         });
 
-        function log(channel, level, message) {
+        function log(channel, level, message, error = null) {
             const channelName = LogConfig.channels[channel].name;
             const levelName = LogConfig.levels[level].name;
             const levelColor = LogConfig.levels[level].color;
             
             const logMessage = `[${channelName}][${levelName}] ${message}`;
             const style = `color: ${levelColor}; font-family: monospace;`;
-            
+
             if (level === Level.ERROR) {
                 console.error('%c' + logMessage, style);
+                if (error) console.error('Full error:', error); 
             } else if (level === Level.WARN) {
                 console.warn('%c' + logMessage, style);
             } else {
@@ -119,35 +120,35 @@
             output.innerHTML += `<br><span style="color: ${levelColor}; font-family: monospace;">${logMessage}</span>`;
         }
 
-        function log_error(ptr, len) {
+        function wasm_err(ptr, len) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
             log(Channel.WASM, Level.ERROR, message);
         }
 
-        function log_info(ptr, len) {
+        function wasm_info(ptr, len) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
             log(Channel.WASM, Level.INFO, message);
         }
 
-        function log_success(ptr, len) {
+        function wasm_success(ptr, len) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
             log(Channel.WASM, Level.SUCCESS, message);
         }
 
-        function log_warn(ptr, len) {
+        function wasm_warn(ptr, len) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
             log(Channel.WASM, Level.WARN, message);
         }
 
-        function log_debug(ptr, len) {
+        function wasm_debug(ptr, len) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
@@ -197,7 +198,7 @@
                         await loadWasm();
                     }
                 } catch (e) {
-                    console.error('HMR check failed:', e);
+                    log(Channel.JS, Level.ERROR, 'HMR check failed:', e);
                 }
             }, 500); 
         }
@@ -209,11 +210,11 @@
                 
                 const importObject = {
                     env: {
-                        log_error: log_error,
-                        log_success: log_success,
-                        log_warn: log_warn,
-                        log_info: log_info,
-                        log_debug: log_debug,
+                        wasm_err: wasm_err,
+                        wasm_success: wasm_success,
+                        wasm_warn: wasm_warn,
+                        wasm_info: wasm_info,
+                        wasm_debug: wasm_debug,
                     }
                 };
 
@@ -240,8 +241,7 @@
                     wasmExports._start(); 
                 }
             } catch (error) {
-                log(Channel.JS, Level.ERROR, 'Error loading WebAssembly: ' + error.message);
-                console.error('WebAssembly loading error:', error);
+                log(Channel.JS, Level.ERROR, 'Error loading WebAssembly: ' + error.message, error);
             }
         }
         

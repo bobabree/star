@@ -5,13 +5,10 @@ const Heap = runtime.Heap;
 const Mem = runtime.Mem;
 const Process = runtime.Process;
 const Server = runtime.server.Server;
-const Log = runtime.Log;
-
-const is_wasm = builtin.target.cpu.arch.isWasm();
-const is_ios = builtin.target.os.tag == .ios;
+const Debug = runtime.Debug;
 
 pub fn main() !void {
-    if (is_wasm) {
+    if (Debug.is_wasm) {
         return;
     }
 
@@ -20,9 +17,8 @@ pub fn main() !void {
     var fba = Heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
-    if (is_ios) {
-        const ios_log = Log.ios_log;
-        ios_log.success("Hello World from Zig iOS!", .{});
+    if (Debug.is_ios) {
+        Debug.ios.success("Hello World from Zig iOS!", .{});
     } else {
         // Check for --dev
         // TODO: non-alloc solution

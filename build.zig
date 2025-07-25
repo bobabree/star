@@ -118,7 +118,7 @@ fn createPlatformArtifacts(
             .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{
                 .reference_types,
                 .bulk_memory,
-                .atomics,
+                //.atomics,
             }),
         }),
         .optimize = optimize,
