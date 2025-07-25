@@ -73,44 +73,24 @@
 
     <script>
         let wasmExports = null;
-        
-        const LogConfig = {
-            channels: [
-                { name: 'js', color: '#FF8C00' },
-                { name: 'wasm', color: '#4A90E2' }
-            ],
-            levels: [
-                { name: 'debug', color: '#6C757D' },   
-                { name: 'info', color: '#0066CC' },   
-                { name: 'warn', color: '#FFD700' },     
-                { name: 'error', color: '#DC3545' },   
-                { name: 'success', color: '#28A745' }  
-            ]
-        };
+        let Scope = {};
+        let Level = {};
 
-        const Channel = {};
-        const Level = {};
-
-        LogConfig.channels.forEach((channel, index) => {
-            Channel[channel.name.toUpperCase()] = index;
-        });
-
-        LogConfig.levels.forEach((level, index) => {
-            Level[level.name.toUpperCase()] = index;
-        });
-
-        function log(channel, level, message, error = null) {
-            const channelName = LogConfig.channels[channel].name;
-            const levelName = LogConfig.levels[level].name;
-            const levelColor = LogConfig.levels[level].color;
+        function log(message, scope, level, error = null) {
+            const scopeName = Scope.asText(scope);
+            const levelName = Level.asText(level);     
+            const levelColor = Level.asHtmlColor(level);
+                        
+            const logMessage = (scope === Scope.js) 
+                ? `[${scopeName}][${levelName}] ${message}` 
+                : message;
             
-            const logMessage = `[${channelName}][${levelName}] ${message}`;
             const style = `color: ${levelColor}; font-family: monospace;`;
 
-            if (level === Level.ERROR) {
+            if (level === Level.err) {
                 console.error('%c' + logMessage, style);
-                if (error) console.error('Full error:', error); 
-            } else if (level === Level.WARN) {
+                if (error) console.error('Full error:', error);  
+            } else if (level === Level.warn) {
                 console.warn('%c' + logMessage, style);
             } else {
                 console.log('%c' + logMessage, style);
@@ -120,39 +100,11 @@
             output.innerHTML += `<br><span style="color: ${levelColor}; font-family: monospace;">${logMessage}</span>`;
         }
 
-        function wasm_err(ptr, len) {
+        function wasm_print(ptr, len, scope, level) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
-            log(Channel.WASM, Level.ERROR, message);
-        }
-
-        function wasm_info(ptr, len) {
-            const memory = wasmExports.memory;
-            const buffer = new Uint8Array(memory.buffer, ptr, len);
-            const message = new TextDecoder().decode(buffer);
-            log(Channel.WASM, Level.INFO, message);
-        }
-
-        function wasm_success(ptr, len) {
-            const memory = wasmExports.memory;
-            const buffer = new Uint8Array(memory.buffer, ptr, len);
-            const message = new TextDecoder().decode(buffer);
-            log(Channel.WASM, Level.SUCCESS, message);
-        }
-
-        function wasm_warn(ptr, len) {
-            const memory = wasmExports.memory;
-            const buffer = new Uint8Array(memory.buffer, ptr, len);
-            const message = new TextDecoder().decode(buffer);
-            log(Channel.WASM, Level.WARN, message);
-        }
-
-        function wasm_debug(ptr, len) {
-            const memory = wasmExports.memory;
-            const buffer = new Uint8Array(memory.buffer, ptr, len);
-            const message = new TextDecoder().decode(buffer);
-            log(Channel.WASM, Level.DEBUG, message);
+            log(message, scope, level);
         }
 
         function callRunTests() {
@@ -165,12 +117,12 @@
             if (wasmExports) {
                 const url = document.getElementById('install-url').value;
                 if (wasmExports.install_externref) {         
-                    log(Channel.JS, Level.SUCCESS, 'Using externref method (no heap allocation)');
+                    log('Using externref method (no heap allocation)', Scope.js, Level.success);
                     
                     // Pass the js-string directly as externref
                     wasmExports.install_externref(url);
                 } else {
-                    log(Channel.JS, Level.WARN, 'Externref not available, using heap allocation');
+                    log('Externref not available, using heap allocation', 'Using externref method (no heap allocation)', Scope.js, Level.warn);
 
                     const urlBytes = new TextEncoder().encode(url);
                 
@@ -194,43 +146,71 @@
                     
                     if (contentLength && parseInt(contentLength) !== lastSize) {
                         lastSize = parseInt(contentLength);
-                        log(Channel.JS, Level.INFO, 'WASM file changed, hot reloading...');
+                        log('WASM file changed, hot reloading...', Scope.js, Level.info);
                         await loadWasm();
                     }
                 } catch (e) {
-                    log(Channel.JS, Level.ERROR, 'HMR check failed:', e);
+                    log('HMR check failed:', Scope.js, Level.err, e);
                 }
             }, 500); 
+        }
+
+        function readString(ptr) {
+            const memory = new Uint8Array(wasmExports.memory.buffer);
+            let end = ptr;
+            while (memory[end] !== 0) end++;
+            return new TextDecoder().decode(memory.slice(ptr, end));
         }
         
         // Load and instantiate the WebAssembly module
         async function loadWasm() {
             try {
-                log(Channel.JS, Level.INFO, 'Loading WebAssembly module...');
+                console.log('Loading WebAssembly module...');
                 
                 const importObject = {
                     env: {
-                        wasm_err: wasm_err,
-                        wasm_success: wasm_success,
-                        wasm_warn: wasm_warn,
-                        wasm_info: wasm_info,
-                        wasm_debug: wasm_debug,
+                        wasm_print: wasm_print,
+                        console_log: console.log,    
                     }
                 };
 
-                // Enable JS builtins for externref support
+                // Enable js builtins for externref support
                 const compileOptions = {
                     builtins: ["js-string", "text-encoder"]
                 };
 
-                const wasmModule = await WebAssembly.instantiateStreaming(
-                    fetch('./star.wasm'),
-                    importObject,
-                    compileOptions
-                );
+                // Fetch and compile first
+                const wasmResponse = await fetch('./star.wasm');
+                const wasmBytes = await wasmResponse.arrayBuffer();
+                const wasmModule = await WebAssembly.compile(wasmBytes, compileOptions);
 
-                wasmExports = wasmModule.instance.exports;
-                log(Channel.JS, Level.INFO, 'WASM reloaded at ' + new Date().toLocaleTimeString());
+                // Then instantiate
+                const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
+                wasmExports = wasmInstance.exports;
+
+                Scope = {
+                    js: wasmExports.get_scope_js(),
+                    wasm: wasmExports.get_scope_wasm(),
+                    server: wasmExports.get_scope_server(),
+                    ios: wasmExports.get_scope_ios(),
+                    default: wasmExports.get_scope_default(),
+
+                    asText: (level) => readString(wasmExports.get_scope_asText(level)),
+                };
+
+                Level = {
+                    err: wasmExports.get_level_err(),
+                    success: wasmExports.get_level_success(),
+                    warn: wasmExports.get_level_warn(),
+                    info: wasmExports.get_level_info(),
+                    debug: wasmExports.get_level_debug(),
+
+                    asText: (level) => readString(wasmExports.get_level_asText(level)),
+                    asAnsiColor: (level) => readString(wasmExports.get_level_asAnsiColor(level)),
+                    asHtmlColor: (level) => readString(wasmExports.get_level_asHtmlColor(level)),
+                };
+
+                log('WASM reloaded at ' + new Date().toLocaleTimeString(), Scope.js, Level.info);
                 
                 if ((location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '') && !window.hmrStarted) {
                     startHMR();
@@ -241,7 +221,7 @@
                     wasmExports._start(); 
                 }
             } catch (error) {
-                log(Channel.JS, Level.ERROR, 'Error loading WebAssembly: ' + error.message, error);
+                log('Error loading WebAssembly: ' + error.message, Scope.js, Level.err, error);
             }
         }
         

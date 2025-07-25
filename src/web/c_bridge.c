@@ -3,10 +3,9 @@ int js_string_length(__externref_t string)
 int js_string_charCodeAt(__externref_t string, int index) 
     __attribute__((import_module("wasm:js-string"), import_name("charCodeAt")));
 
-extern void zig_install_externref(const char* url_str, int length);
-
 // This is O(n) but still better than heap allocation!
 // TODO: consider SIMD, or uncomment the O(1) function below in the future
+extern void zig_install_externref(const char* url_str, int length);
 __attribute__((export_name("install_externref")))
 void install_externref(__externref_t url_ref) {
     int url_length = js_string_length(url_ref);
