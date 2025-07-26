@@ -21,7 +21,6 @@ void install_externref(__externref_t url_ref) {
     zig_install_externref(url_buffer, copy_length);
 }
 
-
 // TODO: uncomment this in the future. 
 // This is O(1) fn but not implemented by most browsers yet
 // int text_encoder_encodeStringIntoUTF8Array(__externref_t string, void* array, int start) 
@@ -38,4 +37,27 @@ void install_externref(__externref_t url_ref) {
         
 //         zig_install_externref(url_buffer, bytes_written);
 //     }
+// }
+
+
+// extern __externref_t js_string_fromCharCode(int char_code) 
+//     __attribute__((import_module("wasm:js-string"), import_name("fromCharCode")));
+
+// extern __externref_t js_string_concat(__externref_t a, __externref_t b)
+//     __attribute__((import_module("wasm:js-string"), import_name("concat")));
+
+
+// __attribute__((export_name("buffer_to_js_string")))
+// __externref_t buffer_to_js_string(const char* buffer, int length) {
+//     if (length == 0) {
+//         return js_string_fromCharCode(0);
+//     }
+    
+//     __externref_t result = js_string_fromCharCode((unsigned char)buffer[0]);
+//     for (int i = 1; i < length; i++) {
+//         __externref_t next_char = js_string_fromCharCode((unsigned char)buffer[i]);
+//         result = js_string_concat(result, next_char);
+//     }
+    
+//     return result;
 // }

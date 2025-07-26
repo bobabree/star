@@ -8,48 +8,60 @@ const print = @import("std").debug.print; // TODO: thread_local?
 pub const is_wasm = builtin.target.cpu.arch.isWasm();
 pub const is_ios = builtin.target.os.tag == .ios;
 
-pub const js = scoped(Scope.js);
-pub const wasm = scoped(Scope.wasm);
-pub const ios = scoped(Scope.ios);
-pub const server = scoped(Scope.server);
-pub const default = scoped(Scope.default);
+pub const js = Scope.js;
+pub const wasm = Scope.wasm;
+pub const ios = Scope.ios;
+pub const server = Scope.server;
+pub const default = Scope.default;
+
+/// The log level will be based on build mode.
+const level: Level = switch (builtin.mode) {
+    .Debug => Level.debug, // Shows: err, success, warn, info, debug (all)
+    .ReleaseSafe => Level.info, // Shows: err, success, warn, info
+    .ReleaseFast => Level.warn, // Shows: err, success, warn
+    .ReleaseSmall => Level.success, // Shows: err, success
+};
+
+const ScopeLevel = struct {
+    scope: Scope,
+    level: Level,
+};
+
+const scope_levels: []const ScopeLevel = &.{
+    .{ .scope = Scope.js, .level = Level.debug },
+    .{ .scope = Scope.wasm, .level = Level.debug },
+    .{ .scope = Scope.server, .level = Level.debug },
+    .{ .scope = Scope.ios, .level = Level.debug },
+    .{ .scope = Scope.default, .level = Level.debug },
+};
+
+// Thread-local scope management
+threadlocal var current_scope: Scope = Scope.default;
+
+fn getCurrentScope() Scope {
+    return if (@inComptime()) Scope.default else current_scope;
+}
 
 pub fn assert(condition: bool) void {
-    if (@inComptime()) {
-        return default.assert(condition);
-    }
-
-    switch (current_scope) {
-        .js => js.assert(condition),
-        .wasm => wasm.assert(condition),
-        .server => server.assert(condition),
-        .ios => ios.assert(condition),
-        .default => scoped(.default).assert(condition),
+    switch (getCurrentScope()) {
+        inline else => |s| s.assert(condition),
     }
 }
 
 pub fn panic(comptime format: []const u8, args: anytype) noreturn {
-    switch (current_scope) {
-        Scope.js => js.panic(format, args),
-        Scope.wasm => wasm.panic(format, args),
-        Scope.server => server.panic(format, args),
-        Scope.ios => ios.panic(format, args),
-        Scope.default => scoped(Scope.default).panic(format, args),
+    switch (getCurrentScope()) {
+        inline else => |scope| scope.panic(format, args),
     }
 }
 
 pub fn panicAssert(condition: bool, comptime format: []const u8, args: anytype) void {
-    switch (current_scope) {
-        Scope.js => js.panicAssert(condition, format, args),
-        Scope.wasm => wasm.panicAssert(condition, format, args),
-        Scope.server => server.panicAssert(condition, format, args),
-        Scope.ios => ios.panicAssert(condition, format, args),
-        Scope.default => scoped(Scope.default).panicAssert(condition, format, args),
+    switch (getCurrentScope()) {
+        inline else => |scope| scope.panicAssert(condition, format, args),
     }
 }
 
 // Externs for WASM
-extern fn wasm_print(ptr: [*]const u8, len: usize, channel: u8, level: u8) void;
+extern fn wasm_print(ptr: [*]const u8, len: usize, scope: Scope, level: Level) void;
 
 const Scope = enum(u8) {
     js = 0,
@@ -59,13 +71,115 @@ const Scope = enum(u8) {
     default = 4,
 
     pub fn asText(comptime self: Scope) []const u8 {
-        return switch (self) {
-            .js => "js",
-            .wasm => "wasm",
-            .server => "server",
-            .ios => "ios",
-            .default => "default",
-        };
+        return @tagName(self);
+    }
+
+    pub fn err(
+        comptime self: Scope,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        @branchHint(.cold);
+        self.log(Level.err, format, args);
+    }
+
+    pub fn success(
+        comptime self: Scope,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        self.log(Level.success, format, args);
+    }
+
+    pub fn warn(
+        comptime self: Scope,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        self.log(Level.warn, format, args);
+    }
+
+    pub fn info(
+        comptime self: Scope,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        self.log(Level.info, format, args);
+    }
+
+    pub fn debug(
+        comptime self: Scope,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        self.log(Level.debug, format, args);
+    }
+
+    pub fn assert(comptime self: Scope, condition: bool) void {
+        if (!condition) {
+            self.err("assertion failed at {s}:{d}", .{ @src().file, @src().line });
+            unreachable; // assertion failure
+        }
+    }
+
+    pub fn panic(comptime self: Scope, comptime format: []const u8, args: anytype) noreturn {
+        @branchHint(.cold);
+        self.err(format, args);
+        panicExtra(@returnAddress(), format, args);
+    }
+
+    pub fn panicAssert(comptime self: Scope, condition: bool, comptime format: []const u8, args: anytype) void {
+        if (!condition) {
+            @branchHint(.cold);
+            self.err("assertion failed at {s}:{d}", .{ @src().file, @src().line });
+            self.panic(format, args);
+            unreachable; // assertion failure
+        }
+    }
+
+    fn log(
+        comptime self: Scope,
+        comptime message_level: Level,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (comptime !self.logEnabled(message_level)) return;
+
+        self.logFn(message_level, format, args);
+    }
+
+    fn logEnabled(comptime self: Scope, comptime message_level: Level) bool {
+        inline for (scope_levels) |scope_level| {
+            if (scope_level.scope == self) return @intFromEnum(message_level) <= @intFromEnum(scope_level.level);
+        }
+        return @intFromEnum(message_level) <= @intFromEnum(level);
+    }
+
+    fn logMessage(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
+        if (is_wasm) {
+            wasm_print(message.ptr, message.len, self, message_level); // Pass enums directly!
+        } else {
+            print(message_level.asAnsiColor() ++ "{s}\x1b[0m", .{message});
+        }
+    }
+
+    fn logFn(
+        comptime self: Scope,
+        comptime message_level: Level,
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        // Ignore all non-error logging from sources other than the declared scopes
+        const prefix = if (self == .default)
+            " "
+        else
+            "[" ++ @tagName(self) ++ "][" ++ comptime message_level.asText() ++ "] ";
+
+        var buffer = Utf8Buffer(1024).init();
+        buffer.format(prefix ++ format, args);
+        const message = buffer.constSlice();
+
+        self.logMessage(message_level, message);
     }
 };
 
@@ -77,13 +191,7 @@ const Level = enum(u8) {
     debug = 4,
 
     pub fn asText(comptime self: Level) []const u8 {
-        return switch (self) {
-            Level.err => "err",
-            Level.success => "success",
-            Level.warn => "warning",
-            Level.info => "info",
-            Level.debug => "debug",
-        };
+        return @tagName(self);
     }
 
     pub fn asAnsiColor(comptime self: Level) []const u8 {
@@ -107,210 +215,140 @@ const Level = enum(u8) {
     }
 };
 
-// Auto-generate exports using comptime reflection
+const ascii = @import("std").ascii;
+const fmt = @import("std").fmt;
+const meta = @import("std").meta;
+
+// // Auto-generate exports using comptime reflection
+fn generateEnumJS(comptime EnumType: type) []const u8 {
+    @setEvalBranchQuota(10000);
+    comptime {
+        var buffer: [4096]u8 = undefined;
+        var len: usize = 0;
+
+        const enum_info = @typeInfo(EnumType).@"enum";
+        const enum_name = @typeName(EnumType);
+
+        // Helper to append string to buffer
+        const append = struct {
+            fn appendStr(buf: []u8, pos: *usize, str: []const u8) void {
+                @memcpy(buf[pos.* .. pos.* + str.len], str);
+                pos.* += str.len;
+            }
+        }.appendStr;
+
+        //  create the enum object
+        append(&buffer, &len, "wasmExports.");
+        append(&buffer, &len, enum_name);
+        append(&buffer, &len, " = {\n");
+
+        for (enum_info.fields) |field| {
+            append(&buffer, &len, "  ");
+            append(&buffer, &len, field.name);
+            append(&buffer, &len, ": {\n");
+            append(&buffer, &len, "    valueOf: () => ");
+
+            // Convert field value to string
+            const num_str = fmt.comptimePrint("{}", .{field.value});
+            append(&buffer, &len, num_str);
+            append(&buffer, &len, ",\n");
+
+            // add methods
+            for (meta.declarations(EnumType)) |decl| {
+                if (decl.name.len > 0) {
+                    const DeclType = @TypeOf(@field(EnumType, decl.name));
+                    if (@typeInfo(DeclType) == .@"fn") {
+                        append(&buffer, &len, "    ");
+                        append(&buffer, &len, decl.name);
+                        // TODO: remove readString via externref to avoid heap allocation calls to js
+                        // we currently have JS->LLVM->Zig working but now need to implement Zig->LLVM->JS
+                        append(&buffer, &len, ": () => readString(wasmExports[\"");
+                        append(&buffer, &len, enum_name);
+                        append(&buffer, &len, "_");
+                        append(&buffer, &len, decl.name);
+                        append(&buffer, &len, "\"](");
+                        append(&buffer, &len, num_str);
+                        append(&buffer, &len, ")),\n");
+                    }
+                }
+            }
+
+            append(&buffer, &len, "  },\n");
+        }
+
+        append(&buffer, &len, "};\n");
+
+        return buffer[0..len];
+    }
+}
+
+const enum_bindings_js = blk: {
+    const scope_js = generateEnumJS(Scope);
+    const level_js = generateEnumJS(Level);
+
+    const total_len = scope_js.len + level_js.len;
+    var buffer: [total_len + 1]u8 = undefined;
+    var len: usize = 0;
+
+    @memcpy(buffer[len .. len + scope_js.len], scope_js);
+    len += scope_js.len;
+    @memcpy(buffer[len .. len + level_js.len], level_js);
+    len += level_js.len;
+    buffer[len] = 0; // Null terminate
+
+    break :blk buffer[0..len :0].*;
+};
+
+export fn getEnumBindings() [*:0]const u8 {
+    return &enum_bindings_js;
+}
+
+fn generateEnumExports(comptime EnumType: type) void {
+    const enum_name = @typeName(EnumType);
+    const enum_info = @typeInfo(EnumType).@"enum";
+
+    // Export enum values
+    for (enum_info.fields) |field| {
+        const fn_name = enum_name ++ "_" ++ field.name;
+        const exportFn = struct {
+            fn get() callconv(.c) u8 {
+                return @intFromEnum(@field(EnumType, field.name));
+            }
+        }.get;
+        @export(&exportFn, .{ .name = fn_name });
+    }
+
+    // Only export methods that take just the self parameter
+    inline for (meta.declarations(EnumType)) |decl| {
+        if (@hasDecl(EnumType, decl.name)) {
+            const DeclType = @TypeOf(@field(EnumType, decl.name));
+            if (@typeInfo(DeclType) == .@"fn") {
+                const fn_info = @typeInfo(DeclType).@"fn";
+
+                // Only export functions with 1 parameter (just self)
+                if (fn_info.params.len == 1) {
+                    const fn_name = enum_name ++ "_" ++ decl.name;
+                    const exportFn = struct {
+                        fn get(val: u8) callconv(.c) [*:0]const u8 {
+                            return switch (@as(EnumType, @enumFromInt(val))) {
+                                inline else => |comptime_val| {
+                                    const result = @call(.auto, @field(EnumType, decl.name), .{comptime_val});
+                                    return @as([*:0]const u8, @ptrCast(result.ptr));
+                                },
+                            };
+                        }
+                    }.get;
+                    @export(&exportFn, .{ .name = fn_name });
+                }
+            }
+        }
+    }
+}
+
 comptime {
-    const scope_info = @typeInfo(Scope);
-    const level_info = @typeInfo(Level);
-
-    // Generate scope exports: get_scope_js(), get_scope_wasm(), etc.
-    for (scope_info.@"enum".fields) |field| {
-        const fn_name = "get_scope_" ++ field.name;
-        const exportFn = struct {
-            fn get() callconv(.c) u8 {
-                return @intFromEnum(@field(Scope, field.name));
-            }
-        }.get;
-
-        @export(&exportFn, .{ .name = fn_name });
-    }
-
-    const scope_methods = [_][]const u8{"asText"};
-    for (scope_methods) |method_name| {
-        const fn_name = "get_scope_" ++ method_name;
-        const exportFn = struct {
-            fn get(val: u8) callconv(.c) [*:0]const u8 {
-                return switch (@as(Scope, @enumFromInt(val))) {
-                    inline else => |comptime_val| {
-                        const result = @call(.auto, @field(Scope, method_name), .{comptime_val});
-                        return @as([*:0]const u8, @ptrCast(result.ptr));
-                    },
-                };
-            }
-        }.get;
-        @export(&exportFn, .{ .name = fn_name });
-    }
-
-    // Generate level exports: get_level_err(), get_level_success(), etc.
-    for (level_info.@"enum".fields) |field| {
-        const fn_name = "get_level_" ++ field.name;
-        const exportFn = struct {
-            fn get() callconv(.c) u8 {
-                return @intFromEnum(@field(Level, field.name));
-            }
-        }.get;
-
-        @export(&exportFn, .{ .name = fn_name });
-    }
-
-    const level_methods = [_][]const u8{ "asText", "asHtmlColor", "asAnsiColor" };
-    for (level_methods) |method_name| {
-        const fn_name = "get_level_" ++ method_name;
-        const exportFn = struct {
-            fn get(val: u8) callconv(.c) [*:0]const u8 {
-                return switch (@as(Level, @enumFromInt(val))) {
-                    inline else => |comptime_val| {
-                        const result = @call(.auto, @field(Level, method_name), .{comptime_val});
-                        return @as([*:0]const u8, @ptrCast(result.ptr));
-                    },
-                };
-            }
-        }.get;
-        @export(&exportFn, .{ .name = fn_name });
-    }
-}
-
-/// The log level will be based on build mode.
-const level: Level = switch (builtin.mode) {
-    .Debug => Level.debug, // Shows: err, success, warn, info, debug (all)
-    .ReleaseSafe => Level.info, // Shows: err, success, warn, info
-    .ReleaseFast => Level.warn, // Shows: err, success, warn
-    .ReleaseSmall => Level.success, // Shows: err, success
-};
-
-// Thread-local scope management
-threadlocal var current_scope: Scope = Scope.default;
-
-const ScopeLevel = struct {
-    scope: Scope,
-    level: Level,
-};
-
-const scope_levels: []const ScopeLevel = &.{
-    .{ .scope = Scope.js, .level = Level.debug },
-    .{ .scope = Scope.wasm, .level = Level.debug },
-    .{ .scope = Scope.server, .level = Level.debug },
-    .{ .scope = Scope.ios, .level = Level.debug },
-    .{ .scope = Scope.default, .level = Level.debug },
-};
-
-fn log(
-    comptime message_level: Level,
-    comptime scope: Scope,
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (comptime !logEnabled(message_level, scope)) return;
-
-    logFn(message_level, scope, format, args);
-}
-
-fn logEnabled(comptime message_level: Level, comptime scope: Scope) bool {
-    inline for (scope_levels) |scope_level| {
-        if (scope_level.scope == scope) return @intFromEnum(message_level) <= @intFromEnum(scope_level.level);
-    }
-    return @intFromEnum(message_level) <= @intFromEnum(level);
-}
-
-fn logMessage(comptime scope: Scope, comptime message_level: Level, message: []const u8) void {
-    if (is_wasm) {
-        wasm_print(message.ptr, message.len, @intFromEnum(scope), @intFromEnum(message_level));
-    } else {
-        print(message_level.asAnsiColor() ++ "{s}\x1b[0m", .{message});
-    }
-}
-
-fn logFn(
-    comptime message_level: Level,
-    comptime scope: Scope,
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    // Ignore all non-error logging from sources other than the declared scopes
-    const scope_prefix = "[" ++ switch (scope) {
-        Scope.js,
-        Scope.wasm,
-        Scope.server,
-        Scope.ios,
-        => @tagName(scope),
-        Scope.default => "",
-    } ++ "]";
-
-    const prefix = switch (scope) {
-        Scope.js,
-        Scope.wasm,
-        Scope.server,
-        Scope.ios,
-        => scope_prefix ++ "[" ++ comptime message_level.asText() ++ "]",
-        Scope.default => "",
-    } ++ " ";
-
-    var buffer = Utf8Buffer(1024).init();
-    buffer.format(prefix ++ format, args);
-    const message = buffer.constSlice();
-
-    logMessage(scope, message_level, message);
-}
-
-pub fn scoped(comptime scope: Scope) type {
-    return struct {
-        pub fn err(
-            comptime format: []const u8,
-            args: anytype,
-        ) void {
-            @branchHint(.cold);
-            log(Level.err, scope, format, args);
-        }
-
-        pub fn success(
-            comptime format: []const u8,
-            args: anytype,
-        ) void {
-            log(Level.success, scope, format, args);
-        }
-
-        pub fn warn(
-            comptime format: []const u8,
-            args: anytype,
-        ) void {
-            log(Level.warn, scope, format, args);
-        }
-
-        pub fn info(
-            comptime format: []const u8,
-            args: anytype,
-        ) void {
-            log(Level.info, scope, format, args);
-        }
-
-        pub fn debug(
-            comptime format: []const u8,
-            args: anytype,
-        ) void {
-            log(Level.debug, scope, format, args);
-        }
-
-        pub fn assert(condition: bool) void {
-            if (!condition) {
-                @This().err("assertion failed at {s}:{d}", .{ @src().file, @src().line });
-                unreachable; // assertion failure
-            }
-        }
-
-        pub fn panic(comptime format: []const u8, args: anytype) noreturn {
-            @branchHint(.cold);
-            @This().err(format, args);
-            panicExtra(@returnAddress(), format, args);
-        }
-
-        pub fn panicAssert(condition: bool, comptime format: []const u8, args: anytype) void {
-            if (!condition) {
-                @branchHint(.cold);
-                @This().err("assertion failed at {s}:{d}", .{ @src().file, @src().line });
-                @This().panic(format, args);
-                unreachable; // assertion failure
-            }
-        }
-    };
+    // Creates WASM exports: Scope_asText, Level_asText, etc.
+    generateEnumExports(Scope);
+    generateEnumExports(Level);
 }
 
 comptime {

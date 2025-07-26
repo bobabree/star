@@ -77,9 +77,9 @@
         let Level = {};
 
         function log(message, scope, level, error = null) {
-            const scopeName = Scope.asText(scope);
-            const levelName = Level.asText(level);     
-            const levelColor = Level.asHtmlColor(level);
+            const scopeName = scope.asText();
+            const levelName = level.asText();     
+            const levelColor = level.asHtmlColor();
                         
             const logMessage = (scope === Scope.js) 
                 ? `[${scopeName}][${levelName}] ${message}` 
@@ -104,9 +104,15 @@
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
-            log(message, scope, level);
+            
+            // Convert raw numbers to JavaScript objects, use externref in the future
+            // so that we can just do log(message, scope, level)
+            const scopeValues = [Scope.js, Scope.wasm, Scope.server, Scope.ios, Scope.default];
+            const levelValues = [Level.err, Level.success, Level.warn, Level.info, Level.debug];
+            
+            log(message, scopeValues[scope], levelValues[level]);
         }
-
+        
         function callRunTests() {
             if (wasmExports) {
                 wasmExports.runTests();
@@ -159,8 +165,10 @@
             const memory = new Uint8Array(wasmExports.memory.buffer);
             let end = ptr;
             while (memory[end] !== 0) end++;
-            return new TextDecoder().decode(memory.slice(ptr, end));
+            return new TextDecoder().decode(memory.subarray(ptr, end));
         }
+
+        const str = (fn) => (level) => readString(fn(level));
         
         // Load and instantiate the WebAssembly module
         async function loadWasm() {
@@ -186,29 +194,28 @@
 
                 // Then instantiate
                 const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
-                wasmExports = wasmInstance.exports;
+                const wasmRawExports = wasmInstance.exports;
 
-                Scope = {
-                    js: wasmExports.get_scope_js(),
-                    wasm: wasmExports.get_scope_wasm(),
-                    server: wasmExports.get_scope_server(),
-                    ios: wasmExports.get_scope_ios(),
-                    default: wasmExports.get_scope_default(),
+                //console.log("Available WASM exports:", Object.keys(wasmExports));
 
-                    asText: (level) => readString(wasmExports.get_scope_asText(level)),
+                // wasmExports:
+                // 1. Makes wasmExports writable (WebAssembly exports are read-only)
+                // 2. Pre-declares the Zig module structure that will be populated by generated code
+                wasmExports = {
+                    ...wasmRawExports,  
+                    runtime: {
+                        Debug: {} 
+                        // ..future modules exported to js
+                    }
                 };
 
-                Level = {
-                    err: wasmExports.get_level_err(),
-                    success: wasmExports.get_level_success(),
-                    warn: wasmExports.get_level_warn(),
-                    info: wasmExports.get_level_info(),
-                    debug: wasmExports.get_level_debug(),
+                // Get the generated JS code from Zig
+                const bindingsCode = readString(wasmExports.getEnumBindings());
 
-                    asText: (level) => readString(wasmExports.get_level_asText(level)),
-                    asAnsiColor: (level) => readString(wasmExports.get_level_asAnsiColor(level)),
-                    asHtmlColor: (level) => readString(wasmExports.get_level_asHtmlColor(level)),
-                };
+                eval(bindingsCode);
+
+                Scope = wasmExports.runtime.Debug.Scope;
+                Level = wasmExports.runtime.Debug.Level;
 
                 log('WASM reloaded at ' + new Date().toLocaleTimeString(), Scope.js, Level.info);
                 
