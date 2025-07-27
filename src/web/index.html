@@ -74,12 +74,13 @@
     <script>
         let wasmExports = null;
         let Scope = {};
-        let Level = {};
 
         function log(message, scope, level, error = null) {
-            const scopeName = scope.asText();
+            const scopeName = "js";
             const levelName = level.asText();     
             const levelColor = level.asHtmlColor();
+
+            console.log('color: ', levelColor);
                         
             const logMessage = (scope === Scope.js) 
                 ? `[${scopeName}][${levelName}] ${message}` 
@@ -100,19 +101,19 @@
             output.innerHTML += `<br><span style="color: ${levelColor}; font-family: monospace;">${logMessage}</span>`;
         }
 
-        function wasm_print(ptr, len, scope, level) {
+        function wasm_print(ptr, len, scope_handle, level_handle) {
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
             
-            // Convert raw numbers to JavaScript objects, use externref in the future
-            // so that we can just do log(message, scope, level)
-            const scopeValues = [Scope.js, Scope.wasm, Scope.server, Scope.ios, Scope.default];
-            const levelValues = [Level.err, Level.success, Level.warn, Level.info, Level.debug];
-            
-            log(message, scopeValues[scope], levelValues[level]);
+            const scope = wasmExports[scope_handle];   
+            const level = wasmExports[level_handle];
+            console.log('inside wasm_print -- level_handle: ', level_handle);
+            console.log('inside wasm_print -- level: ', level);
+
+            log(message, scope, level);         
         }
-        
+
         function callRunTests() {
             if (wasmExports) {
                 wasmExports.runTests();
@@ -168,8 +169,6 @@
             return new TextDecoder().decode(memory.subarray(ptr, end));
         }
 
-        const str = (fn) => (level) => readString(fn(level));
-        
         // Load and instantiate the WebAssembly module
         async function loadWasm() {
             try {
@@ -177,8 +176,7 @@
                 
                 const importObject = {
                     env: {
-                        wasm_print: wasm_print,
-                        console_log: console.log,    
+                        wasm_print: wasm_print,  
                     }
                 };
 
@@ -196,7 +194,7 @@
                 const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
                 const wasmRawExports = wasmInstance.exports;
 
-                //console.log("Available WASM exports:", Object.keys(wasmExports));
+                console.log("Available WASM exports:", Object.keys(wasmRawExports));
 
                 // wasmExports:
                 // 1. Makes wasmExports writable (WebAssembly exports are read-only)
@@ -211,11 +209,14 @@
 
                 // Get the generated JS code from Zig
                 const bindingsCode = readString(wasmExports.getEnumBindings());
-
                 eval(bindingsCode);
 
+                const typeBindings = readString(wasmExports.getTypeBindings());
+                eval(typeBindings);
+
+                //console.log('typeBindings: ', typeBindings);
+
                 Scope = wasmExports.runtime.Debug.Scope;
-                Level = wasmExports.runtime.Debug.Level;
 
                 log('WASM reloaded at ' + new Date().toLocaleTimeString(), Scope.js, Level.info);
                 

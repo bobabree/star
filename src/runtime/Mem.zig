@@ -8,6 +8,8 @@ pub const doNotOptimizeAway = mem.doNotOptimizeAway;
 pub const endsWith = mem.endsWith;
 pub const eql = mem.eql;
 pub const indexOf = mem.indexOf;
+pub const lastIndexOf = mem.lastIndexOf;
+pub const span = mem.span;
 
 const Debug = @import("Debug.zig");
 
