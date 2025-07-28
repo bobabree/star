@@ -72,26 +72,23 @@
     </div>
 
     <script>
-        let wasmExports = null;
-        let Scope = {};
-
         function log(message, scope, level, error = null) {
-            const scopeName = "js";
-            const levelName = level.asText();     
+            const scopeName = scope.asTagName();
+            const levelName = level.asTagName();     
             const levelColor = level.asHtmlColor();
 
             console.log('color: ', levelColor);
                         
-            const logMessage = (scope === Scope.js) 
+            const logMessage = (scope === runtime.Debug.Scope.js) 
                 ? `[${scopeName}][${levelName}] ${message}` 
                 : message;
             
             const style = `color: ${levelColor}; font-family: monospace;`;
 
-            if (level === Level.err) {
+            if (level === runtime.Debug.Level.err) {
                 console.error('%c' + logMessage, style);
                 if (error) console.error('Full error:', error);  
-            } else if (level === Level.warn) {
+            } else if (level === runtime.Debug.Level.warn) {
                 console.warn('%c' + logMessage, style);
             } else {
                 console.log('%c' + logMessage, style);
@@ -105,11 +102,12 @@
             const memory = wasmExports.memory;
             const buffer = new Uint8Array(memory.buffer, ptr, len);
             const message = new TextDecoder().decode(buffer);
+
+            const scope_key = readString(scope_handle);
+            const level_key = readString(level_handle);
             
-            const scope = wasmExports[scope_handle];   
-            const level = wasmExports[level_handle];
-            console.log('inside wasm_print -- level_handle: ', level_handle);
-            console.log('inside wasm_print -- level: ', level);
+            const scope = window[scope_key];   
+            const level = window[level_key];
 
             log(message, scope, level);         
         }
@@ -124,12 +122,12 @@
             if (wasmExports) {
                 const url = document.getElementById('install-url').value;
                 if (wasmExports.install_externref) {         
-                    log('Using externref method (no heap allocation)', Scope.js, Level.success);
+                    log('Using externref method (no heap allocation)', runtime.Debug.Scope.js, runtime.Debug.Level.success);
                     
                     // Pass the js-string directly as externref
                     wasmExports.install_externref(url);
                 } else {
-                    log('Externref not available, using heap allocation', 'Using externref method (no heap allocation)', Scope.js, Level.warn);
+                    log('Externref not available, using heap allocation', 'Using externref method (no heap allocation)', runtime.Debug.Scope.js, runtime.Debug.Level.warn);
 
                     const urlBytes = new TextEncoder().encode(url);
                 
@@ -153,11 +151,11 @@
                     
                     if (contentLength && parseInt(contentLength) !== lastSize) {
                         lastSize = parseInt(contentLength);
-                        log('WASM file changed, hot reloading...', Scope.js, Level.info);
+                        log('WASM file changed, hot reloading...', runtime.Debug.Scope.js, runtime.Debug.Level.info);
                         await loadWasm();
                     }
                 } catch (e) {
-                    log('HMR check failed:', Scope.js, Level.err, e);
+                    log('HMR check failed:', runtime.Debug.Scope.js, runtime.Debug.Level.err, e);
                 }
             }, 500); 
         }
@@ -171,66 +169,50 @@
 
         // Load and instantiate the WebAssembly module
         async function loadWasm() {
-            try {
-                console.log('Loading WebAssembly module...');
-                
-                const importObject = {
-                    env: {
-                        wasm_print: wasm_print,  
-                    }
-                };
-
-                // Enable js builtins for externref support
-                const compileOptions = {
-                    builtins: ["js-string", "text-encoder"]
-                };
-
-                // Fetch and compile first
-                const wasmResponse = await fetch('./star.wasm');
-                const wasmBytes = await wasmResponse.arrayBuffer();
-                const wasmModule = await WebAssembly.compile(wasmBytes, compileOptions);
-
-                // Then instantiate
-                const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
+            console.log('Loading WebAssembly module...');
+            const importObject = {
+                env: {
+                    wasm_print: wasm_print,  
+                }
+            };
+            const compileOptions = {
+                builtins: ["js-string", "text-encoder"]
+            };
+            
+            fetch('./star.wasm')
+            .then(response => response.arrayBuffer())
+            .then(wasmBytes => WebAssembly.compile(wasmBytes, compileOptions))
+            .then(wasmModule => WebAssembly.instantiate(wasmModule, importObject))
+            .then(wasmInstance => {
                 const wasmRawExports = wasmInstance.exports;
-
-                console.log("Available WASM exports:", Object.keys(wasmRawExports));
-
-                // wasmExports:
-                // 1. Makes wasmExports writable (WebAssembly exports are read-only)
-                // 2. Pre-declares the Zig module structure that will be populated by generated code
-                wasmExports = {
-                    ...wasmRawExports,  
+                window.wasmExports = {
+                    ...wasmRawExports,
                     runtime: {
-                        Debug: {} 
-                        // ..future modules exported to js
+                        Debug: {}
                     }
                 };
+                window.runtime = wasmExports.runtime;
 
-                // Get the generated JS code from Zig
-                const bindingsCode = readString(wasmExports.getEnumBindings());
+                // Get the JS bindings  
+                const bindingsCode = readString(wasmExports.getJsBindings());
+                console.log('wasmExports: ', wasmExports);
+                console.log('bindingsCode: ', bindingsCode);
                 eval(bindingsCode);
-
-                const typeBindings = readString(wasmExports.getTypeBindings());
-                eval(typeBindings);
-
-                //console.log('typeBindings: ', typeBindings);
-
-                Scope = wasmExports.runtime.Debug.Scope;
-
-                log('WASM reloaded at ' + new Date().toLocaleTimeString(), Scope.js, Level.info);
+                
+                log('WASM reloaded at ' + new Date().toLocaleTimeString(), runtime.Debug.Scope.js, runtime.Debug.Level.info);
                 
                 if ((location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '') && !window.hmrStarted) {
                     startHMR();
                     window.hmrStarted = true;
                 }
-        
+
                 if (wasmExports._start) {
                     wasmExports._start(); 
                 }
-            } catch (error) {
-                log('Error loading WebAssembly: ' + error.message, Scope.js, Level.err, error);
-            }
+            })
+            .catch(error => {
+                console.log('Error loading WebAssembly: ', error);
+            });
         }
         
         // Load WASM when page loads

@@ -25,7 +25,7 @@ const level: Level = switch (builtin.mode) {
 
 const ScopeLevel = struct {
     scope: Scope,
-    level: type,
+    level: Level,
 };
 
 const scope_levels: []const ScopeLevel = &.{
@@ -62,7 +62,7 @@ pub fn panicAssert(condition: bool, comptime format: []const u8, args: anytype) 
 }
 
 // Externs for WASM
-extern fn wasm_print(ptr: [*]const u8, len: usize, scope: Scope, level_handle: [*:0]const u8) void;
+extern fn wasm_print(ptr: [*]const u8, len: usize, scope: [*:0]const u8, level_handle: [*:0]const u8) void;
 
 const Scope = enum(u8) {
     js = 0,
@@ -71,7 +71,16 @@ const Scope = enum(u8) {
     ios = 3,
     default = 4,
 
-    pub fn asText(comptime self: Scope) []const u8 {
+    pub fn asHandle(comptime self: Scope) [*:0]const u8 {
+        const handle = comptime (@typeName(@This()) ++ "." ++ self.asTagName());
+        return @ptrCast(handle.ptr);
+    }
+
+    pub fn asTypeName(comptime self: Scope) []const u8 {
+        return @typeName(@TypeOf(self));
+    }
+
+    pub fn asTagName(comptime self: Scope) []const u8 {
         return @tagName(self);
     }
 
@@ -140,7 +149,7 @@ const Scope = enum(u8) {
 
     fn log(
         comptime self: Scope,
-        comptime message_level: type,
+        comptime message_level: Level,
         comptime format: []const u8,
         args: anytype,
     ) void {
@@ -149,16 +158,16 @@ const Scope = enum(u8) {
         self.logFn(message_level, format, args);
     }
 
-    fn logEnabled(comptime self: Scope, comptime message_level: type) bool {
+    fn logEnabled(comptime self: Scope, comptime message_level: Level) bool {
         inline for (scope_levels) |scope_level| {
-            if (scope_level.scope == self) return message_level.asValue() <= scope_level.level.asValue();
+            if (scope_level.scope == self) return @intFromEnum(message_level) <= @intFromEnum(scope_level.level);
         }
-        return message_level.asValue() <= level.asValue();
+        return message_level <= level;
     }
 
-    fn logMessage(comptime self: Scope, comptime message_level: type, message: []const u8) void {
+    fn logMessage(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
         if (is_wasm) {
-            wasm_print(message.ptr, message.len, self, message_level.asHandle());
+            wasm_print(message.ptr, message.len, self.asHandle(), message_level.asHandle()); //
         } else {
             print(message_level.asAnsiColor() ++ "{s}\x1b[0m", .{message});
         }
@@ -166,7 +175,7 @@ const Scope = enum(u8) {
 
     fn logFn(
         comptime self: Scope,
-        comptime message_level: type,
+        comptime message_level: Level,
         comptime format: []const u8,
         args: anytype,
     ) void {
@@ -174,7 +183,7 @@ const Scope = enum(u8) {
         const prefix = if (self == .default)
             " "
         else
-            "[" ++ @tagName(self) ++ "][" ++ comptime message_level.asText() ++ "] ";
+            "[" ++ @tagName(self) ++ "][" ++ @tagName(message_level) ++ "] ";
 
         var buffer = Utf8Buffer(1024).init();
         buffer.format(prefix ++ format, args);
@@ -186,41 +195,41 @@ const Scope = enum(u8) {
 
 pub const Handle = [*:0]const u8;
 
-pub const Level = struct {
-    pub const err = impl(0, "err", "\x1b[1;31m", "#DC3545");
-    pub const success = impl(1, "success", "\x1b[1;32m", "#28A745");
-    pub const warn = impl(2, "warn", "\x1b[1;33m", "#FFD700");
-    pub const info = impl(3, "info", "\x1b[1;34m", "#0066CC");
-    pub const debug = impl(4, "debug", "\x1b[1;30m", "#6C757D");
+const Level = enum(u8) {
+    err = 0,
+    success = 1,
+    warn = 2,
+    info = 3,
+    debug = 4,
+
     const type_name = @typeName(@This());
 
-    fn impl(
-        comptime value: u8,
-        comptime name: []const u8,
-        comptime ansi: []const u8,
-        comptime html: []const u8,
-    ) type {
-        return struct {
-            pub fn asHandle() Handle {
-                const handle_name = comptime (type_name ++ "." ++ name);
-                return @ptrCast(handle_name);
-            }
+    pub fn asHandle(comptime self: Level) [*:0]const u8 {
+        const handle_name = comptime (type_name ++ "." ++ self.asTagName());
+        return @ptrCast(handle_name.ptr);
+    }
 
-            pub fn asValue() u8 {
-                return value;
-            }
+    pub fn asTagName(comptime self: Level) []const u8 {
+        return @tagName(self);
+    }
 
-            pub fn asText() []const u8 {
-                return name;
-            }
+    pub fn asAnsiColor(comptime self: Level) []const u8 {
+        return switch (self) {
+            Level.err => "\x1b[1;31m",
+            Level.success => "\x1b[1;32m",
+            Level.warn => "\x1b[1;33m",
+            Level.info => "\x1b[1;34m",
+            Level.debug => "\x1b[1;30m",
+        };
+    }
 
-            pub fn asAnsiColor() []const u8 {
-                return ansi;
-            }
-
-            pub fn asHtmlColor() []const u8 {
-                return html;
-            }
+    pub fn asHtmlColor(comptime self: Level) []const u8 {
+        return switch (self) {
+            Level.err => "#DC3545",
+            Level.success => "#28A745",
+            Level.warn => "#FFD700",
+            Level.info => "#0066CC",
+            Level.debug => "#6C757D",
         };
     }
 };
@@ -230,14 +239,14 @@ const fmt = @import("std").fmt;
 const meta = @import("std").meta;
 
 // // Auto-generate exports using comptime reflection
-fn generateEnumJS(comptime EnumType: type) []const u8 {
+fn generateJsBindings(comptime ZigType: type, comptime namespace: []const u8) []const u8 {
     @setEvalBranchQuota(10000);
     comptime {
-        var buffer: [4096]u8 = undefined;
+        var buffer: [4096 * 2]u8 = undefined;
         var len: usize = 0;
 
-        const enum_info = @typeInfo(EnumType).@"enum";
-        const enum_name = @typeName(EnumType);
+        const enum_info = @typeInfo(ZigType).@"enum";
+        const enum_name = @typeName(ZigType);
 
         const append = struct {
             fn appendStr(buf: []u8, pos: *usize, str: []const u8) void {
@@ -246,8 +255,9 @@ fn generateEnumJS(comptime EnumType: type) []const u8 {
             }
         }.appendStr;
 
-        //  create the enum object
-        append(&buffer, &len, "wasmExports.");
+        //  create the object
+        append(&buffer, &len, namespace);
+        append(&buffer, &len, ".");
         append(&buffer, &len, enum_name);
         append(&buffer, &len, " = {\n");
 
@@ -263,13 +273,12 @@ fn generateEnumJS(comptime EnumType: type) []const u8 {
             append(&buffer, &len, ",\n");
 
             // add methods
-            for (meta.declarations(EnumType)) |decl| {
+            for (meta.declarations(ZigType)) |decl| {
                 if (decl.name.len > 0) {
-                    const DeclType = @TypeOf(@field(EnumType, decl.name));
+                    const DeclType = @TypeOf(@field(ZigType, decl.name));
                     if (@typeInfo(DeclType) == .@"fn") {
                         append(&buffer, &len, "    ");
                         append(&buffer, &len, decl.name);
-                        // TODO: we currently have JS->LLVM->Zig working but now need to implement Zig->LLVM->JS
                         append(&buffer, &len, ": () => readString(wasmExports[\"");
                         append(&buffer, &len, enum_name);
                         append(&buffer, &len, "_");
@@ -286,60 +295,52 @@ fn generateEnumJS(comptime EnumType: type) []const u8 {
 
         append(&buffer, &len, "};\n");
 
+        for (enum_info.fields) |field| {
+            append(&buffer, &len, namespace);
+            append(&buffer, &len, "[\"");
+            append(&buffer, &len, enum_name);
+            append(&buffer, &len, ".");
+            append(&buffer, &len, field.name);
+            append(&buffer, &len, "\"] = ");
+            append(&buffer, &len, namespace);
+            append(&buffer, &len, ".");
+            append(&buffer, &len, enum_name);
+            append(&buffer, &len, ".");
+            append(&buffer, &len, field.name);
+            append(&buffer, &len, ";\n");
+        }
+
         return buffer[0..len];
     }
 }
 
-const enum_bindings_js = blk: {
-    const scope_js = generateEnumJS(Scope);
+fn generateZigBindings(comptime ZigType: type) void {
+    const enum_name = @typeName(ZigType);
+    const enum_info = @typeInfo(ZigType).@"enum";
 
-    const total_len = scope_js.len;
-    var buffer: [total_len + 1]u8 = undefined;
-    var len: usize = 0;
-
-    @memcpy(buffer[len .. len + scope_js.len], scope_js);
-    len += scope_js.len;
-    buffer[len] = 0; // Null terminate
-
-    break :blk buffer[0..len :0].*;
-};
-
-export fn getEnumBindings() [*:0]const u8 {
-    return &enum_bindings_js;
-}
-
-fn generateEnumExports(comptime EnumType: type) void {
-    const enum_name = @typeName(EnumType);
-    const enum_info = @typeInfo(EnumType).@"enum";
-
-    // Export enum values
-    for (enum_info.fields) |field| {
-        const fn_name = enum_name ++ "_" ++ field.name;
-        const exportFn = struct {
-            fn get() callconv(.c) u8 {
-                return @intFromEnum(@field(EnumType, field.name));
-            }
-        }.get;
-        @export(&exportFn, .{ .name = fn_name });
-    }
-
-    // Only export methods that take just the self parameter
-    inline for (meta.declarations(EnumType)) |decl| {
-        if (@hasDecl(EnumType, decl.name)) {
-            const DeclType = @TypeOf(@field(EnumType, decl.name));
+    inline for (meta.declarations(ZigType)) |decl| {
+        if (@hasDecl(ZigType, decl.name)) {
+            const DeclType = @TypeOf(@field(ZigType, decl.name));
             if (@typeInfo(DeclType) == .@"fn") {
                 const fn_info = @typeInfo(DeclType).@"fn";
 
                 if (fn_info.params.len == 1) {
                     const fn_name = enum_name ++ "_" ++ decl.name;
                     const exportFn = struct {
-                        fn get(val: u8) callconv(.c) [*:0]const u8 {
-                            return switch (@as(EnumType, @enumFromInt(val))) {
-                                inline else => |comptime_val| {
-                                    const result = @call(.auto, @field(EnumType, decl.name), .{comptime_val});
-                                    return @as([*:0]const u8, @ptrCast(result.ptr));
-                                },
-                            };
+                        fn get(val: u8) callconv(.c) usize {
+                            inline for (enum_info.fields) |field| {
+                                if (val == field.value) {
+                                    const result = @field(ZigType, decl.name)(@field(ZigType, field.name));
+
+                                    const ptr = switch (@TypeOf(result)) {
+                                        []const u8 => result.ptr,
+                                        [*:0]const u8 => result,
+                                        else => @compileError("Unsupported return type"),
+                                    };
+                                    return @intFromPtr(ptr);
+                                }
+                            }
+                            unreachable;
                         }
                     }.get;
                     @export(&exportFn, .{ .name = fn_name });
@@ -350,182 +351,83 @@ fn generateEnumExports(comptime EnumType: type) void {
 }
 
 comptime {
-    // Creates WASM exports: Scope_asText, Level_asText, etc.
-    generateEnumExports(Scope);
+    // Create universal zig bindings
+    generateZigBindings(Scope);
+    generateZigBindings(Level);
 }
 
-fn generateTypeJS(comptime TypeInstance: type) []const u8 {
-    @setEvalBranchQuota(10000);
-    const handle = Mem.span(TypeInstance.asHandle());
+const js_bindings = blk: {
+    const scope_js = generateJsBindings(Scope, "window");
+    const level_js = generateJsBindings(Level, "window");
 
-    comptime {
-        var buffer: [4096]u8 = undefined;
-        var len: usize = 0;
-
-        const append = struct {
-            fn appendStr(buf: []u8, pos: *usize, str: []const u8) void {
-                @memcpy(buf[pos.* .. pos.* + str.len], str);
-                pos.* += str.len;
-            }
-        }.appendStr;
-
-        // Create the type object
-        append(&buffer, &len, "wasmExports[wasmExports[\"");
-        append(&buffer, &len, handle);
-        append(&buffer, &len, "_asHandle\"]()] = {\n");
-
-        // Add valueOf method
-        append(&buffer, &len, "  valueOf: () => ");
-        const value_str = fmt.comptimePrint("{}", .{TypeInstance.asValue()});
-        append(&buffer, &len, value_str);
-        append(&buffer, &len, ",\n");
-
-        // Add methods
-        for (meta.declarations(TypeInstance)) |decl| {
-            if (decl.name.len > 0) {
-                const DeclType = @TypeOf(@field(TypeInstance, decl.name));
-                if (@typeInfo(DeclType) == .@"fn") {
-                    const fn_name = handle ++ "_" ++ decl.name;
-
-                    append(&buffer, &len, "  ");
-                    append(&buffer, &len, decl.name);
-                    append(&buffer, &len, ": () => wasmExports[\"");
-                    append(&buffer, &len, fn_name);
-                    append(&buffer, &len, "\"](),\n");
-                }
-            }
-        }
-
-        append(&buffer, &len, "};\n");
-
-        // TODO: streamline this
-        append(&buffer, &len, "window.Level = window.Level || {};\n");
-        append(&buffer, &len, "Level.");
-        append(&buffer, &len, TypeInstance.asText());
-        append(&buffer, &len, " = wasmExports[wasmExports[\"");
-        append(&buffer, &len, handle);
-        append(&buffer, &len, "_asHandle\"]()];\n");
-
-        return buffer[0..len];
-    }
-}
-
-fn generateTypeExport(comptime TypeInstance: type) void {
-    const handle = TypeInstance.asHandle();
-
-    inline for (meta.declarations(TypeInstance)) |decl| {
-        if (decl.name.len > 0) {
-            const DeclType = @TypeOf(@field(TypeInstance, decl.name));
-            if (@typeInfo(DeclType) == .@"fn") {
-                const fn_name = Mem.span(handle) ++ "_" ++ decl.name;
-
-                const exportFn = struct {
-                    fn get() callconv(.c) usize {
-                        return @intFromPtr(TypeInstance.asHandle());
-                    }
-                }.get;
-                @export(&exportFn, .{ .name = fn_name });
-            }
-        }
-    }
-}
-
-comptime {
-    generateTypeExport(Level.err);
-    generateTypeExport(Level.success);
-    generateTypeExport(Level.warn);
-    generateTypeExport(Level.info);
-    generateTypeExport(Level.debug);
-}
-
-const type_bindings_js = blk: {
-    const err_js = generateTypeJS(Level.err);
-    const success_js = generateTypeJS(Level.success);
-    const warn_js = generateTypeJS(Level.warn);
-    const info_js = generateTypeJS(Level.info);
-    const debug_js = generateTypeJS(Level.debug);
-
-    const total_len = err_js.len + success_js.len + warn_js.len + info_js.len + debug_js.len;
+    const total_len = scope_js.len + level_js.len;
     var buffer: [total_len + 1]u8 = undefined;
     var len: usize = 0;
 
-    @memcpy(buffer[len .. len + err_js.len], err_js);
-    len += err_js.len;
-    @memcpy(buffer[len .. len + success_js.len], success_js);
-    len += success_js.len;
-    @memcpy(buffer[len .. len + warn_js.len], warn_js);
-    len += warn_js.len;
-    @memcpy(buffer[len .. len + info_js.len], info_js);
-    len += info_js.len;
-    @memcpy(buffer[len .. len + debug_js.len], debug_js);
-    len += debug_js.len;
+    @memcpy(buffer[len .. len + scope_js.len], scope_js);
+    len += scope_js.len;
+    @memcpy(buffer[len .. len + level_js.len], level_js);
+    len += level_js.len;
     buffer[len] = 0; // Null terminate
 
     break :blk buffer[0..len :0].*;
 };
 
-export fn getTypeBindings() [*:0]const u8 {
-    return &type_bindings_js;
+export fn getJsBindings() [*:0]const u8 {
+    return &js_bindings;
 }
 
 comptime {
-    assert(Level.err.asValue() == 0);
-    assert(Level.success.asValue() == 1);
-    assert(Level.warn.asValue() == 2);
-    assert(Level.info.asValue() == 3);
-    assert(Level.debug.asValue() == 4);
-
-    // Verify zero size
-    assert(@sizeOf(Level.err) == 0);
-    assert(@sizeOf(Level.success) == 0);
-    assert(@sizeOf(Level.warn) == 0);
-    assert(@sizeOf(Level.info) == 0);
-    assert(@sizeOf(Level.debug) == 0);
+    assert(@intFromEnum(Level.err) == 0);
+    assert(@intFromEnum(Level.success) == 1);
+    assert(@intFromEnum(Level.warn) == 2);
+    assert(@intFromEnum(Level.info) == 3);
+    assert(@intFromEnum(Level.debug) == 4);
 }
 
 comptime {
-    const debug_level = Level.debug;
-    const safe_level = Level.info;
-    const fast_level = Level.warn;
-    const small_level = Level.success;
+    const debug_level = @intFromEnum(Level.debug);
+    const safe_level = @intFromEnum(Level.info);
+    const fast_level = @intFromEnum(Level.warn);
+    const small_level = @intFromEnum(Level.success);
 
     // Debug: shows everything
-    assert(Level.err.asValue() <= debug_level.asValue());
-    assert(Level.success.asValue() <= debug_level.asValue());
-    assert(Level.warn.asValue() <= debug_level.asValue());
-    assert(Level.info.asValue() <= debug_level.asValue());
-    assert(Level.debug.asValue() <= debug_level.asValue());
+    assert(@intFromEnum(Level.err) <= debug_level);
+    assert(@intFromEnum(Level.success) <= debug_level);
+    assert(@intFromEnum(Level.warn) <= debug_level);
+    assert(@intFromEnum(Level.info) <= debug_level);
+    assert(@intFromEnum(Level.debug) <= debug_level);
 
     // ReleaseSafe: shows Level.err, Level.success, Level.warn, Level.info
-    assert(Level.err.asValue() <= safe_level.asValue());
-    assert(Level.success.asValue() <= safe_level.asValue());
-    assert(Level.warn.asValue() <= safe_level.asValue());
-    assert(Level.info.asValue() <= safe_level.asValue());
-    assert(!(Level.debug.asValue() <= safe_level.asValue()));
+    assert(@intFromEnum(Level.err) <= safe_level);
+    assert(@intFromEnum(Level.success) <= safe_level);
+    assert(@intFromEnum(Level.warn) <= safe_level);
+    assert(@intFromEnum(Level.info) <= safe_level);
+    assert(!(@intFromEnum(Level.debug) <= safe_level));
 
     // ReleaseFast: shows Level.err, Level.success, Level.warn
-    assert(Level.err.asValue() <= fast_level.asValue());
-    assert(Level.success.asValue() <= fast_level.asValue());
-    assert(Level.warn.asValue() <= fast_level.asValue());
-    assert(!(Level.info.asValue() <= fast_level.asValue()));
-    assert(!(Level.debug.asValue() <= fast_level.asValue()));
+    assert(@intFromEnum(Level.err) <= fast_level);
+    assert(@intFromEnum(Level.success) <= fast_level);
+    assert(@intFromEnum(Level.warn) <= fast_level);
+    assert(!(@intFromEnum(Level.info) <= fast_level));
+    assert(!(@intFromEnum(Level.debug) <= fast_level));
 
     // ReleaseSmall: shows Level.err, Level.success
-    assert(Level.err.asValue() <= small_level.asValue());
-    assert(Level.success.asValue() <= small_level.asValue());
-    assert(!(Level.warn.asValue() <= small_level.asValue()));
-    assert(!(Level.info.asValue() <= small_level.asValue()));
-    assert(!(Level.debug.asValue() <= small_level.asValue()));
+    assert(@intFromEnum(Level.err) <= small_level);
+    assert(@intFromEnum(Level.success) <= small_level);
+    assert(!(@intFromEnum(Level.warn) <= small_level));
+    assert(!(@intFromEnum(Level.info) <= small_level));
+    assert(!(@intFromEnum(Level.debug) <= small_level));
 }
 
 comptime {
     // Test actual override scenario: global restrictive, scope permissive
-    const restrictive_global = Level.err; // Global only shows errors
-    const permissive_scope = Level.debug; // But scope shows everything
+    const restrictive_global = @intFromEnum(Level.err); // Global only shows errors
+    const permissive_scope = @intFromEnum(Level.debug); // But scope shows everything
 
     // If scope override works, scope level should win
-    assert(Level.info.asValue() > restrictive_global.asValue()); // Global would block Level.info
-    assert(Level.info.asValue() <= permissive_scope.asValue()); // But scope allows Level.info
+    assert(@intFromEnum(Level.info) > restrictive_global); // Global would block Level.info
+    assert(@intFromEnum(Level.info) <= permissive_scope); // But scope allows Level.info
 }
 
 const Testing = @import("Testing.zig");
