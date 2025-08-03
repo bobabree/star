@@ -1,222 +1,191 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zig WebAssembly Demo</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        button {
-            background: #007acc;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            margin: 5px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        button:hover {
-            background: #005a99;
-        }
-        #output {
-            background: #f8f8f8;
-            border: 1px solid #ddd;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 5px;
-            font-family: monospace;
-            min-height: 100px;
-        }
-        input {
-            padding: 8px;
-            margin: 5px;
-            border: 1px solid #ddd;
-            border-radius: 3px;
-            font-size: 16px;
-        }
-    </style>
+    <title>Loading...</title>
 </head>
 <body>
-    <div class="container">
-        <h1>Zig WebAssembly Demo</h1>
-        <p>This demonstrates Zig code running in the browser via WebAssembly.</p>
-        
-        <div>
-            <button onclick="callRunTests()">Run Tests</button>
-
-            <button onclick="callInstall()">Install Package</button>
-            <input type="text" id="install-url" placeholder="Package URL" value="https://example.com/package.tar">
-        </div>
-        
-        <div>
-            <input type="number" id="num1" placeholder="First number" value="5">
-            <input type="number" id="num2" placeholder="Second number" value="3">
-        </div>
-
-        <div id="output">
-            <strong>Output:</strong>
-        </div>
-    </div>
-
-    <script>
-        function log(message, scope, level, error = null) {
-            const scopeName = scope.asTagName();
-            const levelName = level.asTagName();     
-            const levelColor = level.asHtmlColor();
-
-            console.log('color: ', levelColor);
-                        
-            const logMessage = (scope === runtime.Debug.Scope.js) 
-                ? `[${scopeName}][${levelName}] ${message}` 
-                : message;
-            
-            const style = `color: ${levelColor}; font-family: monospace;`;
-
-            if (level === runtime.Debug.Level.err) {
-                console.error('%c' + logMessage, style);
-                if (error) console.error('Full error:', error);  
-            } else if (level === runtime.Debug.Level.warn) {
-                console.warn('%c' + logMessage, style);
-            } else {
-                console.log('%c' + logMessage, style);
-            }
-            
-            const output = document.getElementById('output');
-            output.innerHTML += `<br><span style="color: ${levelColor}; font-family: monospace;">${logMessage}</span>`;
-        }
-
-        function wasm_print(ptr, len, scope_handle, level_handle) {
-            const memory = wasmExports.memory;
-            const buffer = new Uint8Array(memory.buffer, ptr, len);
-            const message = new TextDecoder().decode(buffer);
-
-            const scope_key = readString(scope_handle);
-            const level_key = readString(level_handle);
-            
-            const scope = window[scope_key];   
-            const level = window[level_key];
-
-            log(message, scope, level);         
-        }
-
-        function callRunTests() {
-            if (wasmExports) {
-                wasmExports.runTests();
-            }
-        }
-        
-        function callInstall() {
-            if (wasmExports) {
-                const url = document.getElementById('install-url').value;
-                if (wasmExports.install_externref) {         
-                    log('Using externref method (no heap allocation)', runtime.Debug.Scope.js, runtime.Debug.Level.success);
+<script>
+function log(message, scope, level, error = null) {
+    const scopeName = scope.asTagName();
+    const levelName = level.asTagName();     
+    const levelColor = level.asHtmlColor();
                     
-                    // Pass the js-string directly as externref
-                    wasmExports.install_externref(url);
-                } else {
-                    log('Externref not available, using heap allocation', 'Using externref method (no heap allocation)', runtime.Debug.Scope.js, runtime.Debug.Level.warn);
+    const logMessage = (scope === runtime.Debug.Scope.js) 
+        ? `[${scopeName}][${levelName}] ${message}` 
+        : message;
 
-                    const urlBytes = new TextEncoder().encode(url);
+    const style = `color: ${levelColor}; font-family: monospace;`;
+
+    if (level === runtime.Debug.Level.err) {
+        console.error('%c' + logMessage, style);
+        if (error) console.error('Full error:', error);  
+    } else if (level === runtime.Debug.Level.warn) {
+        console.warn('%c' + logMessage, style);
+    } else {
+        console.log('%c' + logMessage, style);
+    }
+
+    const output = document.getElementById('output');
+    if (output) {
+        output.innerHTML += `<br><span style="color: ${levelColor}; font-family: monospace;">${logMessage}</span>`;
+    }
+}
+
+function readString(ptr) {
+    const memory = new Uint8Array(wasmExports.memory.buffer);
+    let end = ptr;
+    while (memory[end] !== 0) end++;
+    return new TextDecoder().decode(memory.subarray(ptr, end));
+}
+
+async function loadWasm() {
+    const importObject = {
+        env: {
+            getString: (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len)),
+
+            startHotReload: () => {
+                if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
                 
-                    const ptr = wasmExports.allocate(urlBytes.length);
-                    if (ptr) {
-                        new Uint8Array(wasmExports.memory.buffer).set(urlBytes, ptr);
-                        wasmExports.install(ptr, urlBytes.length);
+                let lastSize = 0;
+                setInterval(async () => {
+                    try {
+                        // Check file size
+                        const response = await fetch(`./star.wasm?check=${Date.now()}`, { method: 'HEAD' });
+                        const contentLength = response.headers.get('content-length');    
+                        if (contentLength && parseInt(contentLength) !== lastSize) {
+                            lastSize = parseInt(contentLength);
+                            log('WASM file changed, hot reloading...', runtime.Debug.Scope.js, runtime.Debug.Level.info);
+                            await loadWasm();
+                        }
+                    } catch (e) {
+                        log('HMR check failed:', runtime.Debug.Scope.js, runtime.Debug.Level.err, e);
                     }
+                }, 500); 
+            },
+
+            wasm_print: (ptr, len, scope_handle, level_handle) => {
+                const buffer = new Uint8Array(wasmExports.memory.buffer, ptr, len);
+                const message = new TextDecoder().decode(buffer);
+
+                const scope_key = readString(scope_handle);
+                const level_key = readString(level_handle);
+                
+                const scope = window[scope_key];   
+                const level = window[level_key];
+
+                log(message, scope, level);         
+            },
+            
+            createElement: (tag_ptr, tag_len) => {
+                const tag = importObject.env.getString(tag_ptr, tag_len);
+                const el = document.createElement(tag);
+                elements.push(el);
+                return elements.length - 1;
+            },
+            
+            appendChild: (parent_id, child_id) => {
+                if (elements[parent_id] && elements[child_id]) {
+                    elements[parent_id].appendChild(elements[child_id]);
                 }
+            },
+            
+            setAttribute: (id, name_ptr, name_len, value_ptr, value_len) => {
+                const name = importObject.env.getString(name_ptr, name_len);
+                const value = importObject.env.getString(value_ptr, value_len);
+                if (elements[id]) elements[id].setAttribute(name, value);
+            },
+            
+            addEventListener: (id, event_ptr, event_len, callback_id) => {
+                const event = importObject.env.getString(event_ptr, event_len);
+                if (elements[id]) {
+                    elements[id].addEventListener(event, () => wasmExports.invoke(callback_id));
+                }
+            },
+            
+            getValue: (id, buffer_ptr, buffer_len) => {
+                if (elements[id] && elements[id].value) {
+                    const value = elements[id].value;
+                    const bytes = new TextEncoder().encode(value);
+                    const copyLen = Math.min(bytes.length, buffer_len);
+                    new Uint8Array(wasmExports.memory.buffer).set(bytes.slice(0, copyLen), buffer_ptr);
+                    return copyLen;
+                }
+                return 0;
+            },
+            
+            setInnerHTML: (id, html_ptr, html_len) => {
+                const html = importObject.env.getString(html_ptr, html_len);
+                if (elements[id]) elements[id].innerHTML = html;
+            },
+            
+            setTextContent: (id, text_ptr, text_len) => {
+                const text = importObject.env.getString(text_ptr, text_len);
+                if (elements[id]) elements[id].textContent = text;
+            },
+            
+            setClassName: (id, class_ptr, class_len) => {
+                const className = importObject.env.getString(class_ptr, class_len);
+                if (elements[id]) elements[id].className = className;
+            },
+            
+            setId: (id, id_ptr, id_len) => {
+                const elementId = importObject.env.getString(id_ptr, id_len);
+                if (elements[id]) elements[id].id = elementId;
+            },
+            
+            setTitle: (title_ptr, title_len) => {
+                document.title = importObject.env.getString(title_ptr, title_len);
+            },
+            
+            addStyleSheet: (css_ptr, css_len) => {
+                const css = importObject.env.getString(css_ptr, css_len);
+                const style = document.createElement('style');
+                style.textContent = css;
+                document.head.appendChild(style);
             }
         }
+    };
 
-        function startHMR() {
-            let lastSize = 0;
-            
-            setInterval(async () => {
-                try {
-                    // Check file size
-                    const response = await fetch(`./star.wasm?check=${Date.now()}`, { method: 'HEAD' });
-                    const contentLength = response.headers.get('content-length');
-                    
-                    if (contentLength && parseInt(contentLength) !== lastSize) {
-                        lastSize = parseInt(contentLength);
-                        log('WASM file changed, hot reloading...', runtime.Debug.Scope.js, runtime.Debug.Level.info);
-                        await loadWasm();
-                    }
-                } catch (e) {
-                    log('HMR check failed:', runtime.Debug.Scope.js, runtime.Debug.Level.err, e);
-                }
-            }, 500); 
+    const compileOptions = {
+        builtins: ["js-string", "text-encoder"]
+    };
+
+    fetch('./star.wasm')
+    .then(response => response.arrayBuffer())
+    .then(wasmBytes => WebAssembly.compile(wasmBytes, compileOptions))
+    .then(wasmModule => WebAssembly.instantiate(wasmModule, importObject))
+    .then(wasmInstance => {
+        console.log('Loading WebAssembly module...');
+
+        const wasmRawExports = wasmInstance.exports;
+        window.wasmExports = {
+            ...wasmRawExports,
+            runtime: {
+                Debug: {}
+            }
+        };
+        console.log('wasmExports: ', window.wasmExports);
+
+        window.runtime = wasmExports.runtime;
+        window.elements = [null, document.body];
+
+        const bindingsCode = readString(wasmExports.getJsBindings());
+        console.log('bindingsCode: ', bindingsCode);
+        eval(bindingsCode);
+
+        if (wasmExports._start) {
+            wasmExports._start(); 
         }
 
-        function readString(ptr) {
-            const memory = new Uint8Array(wasmExports.memory.buffer);
-            let end = ptr;
-            while (memory[end] !== 0) end++;
-            return new TextDecoder().decode(memory.subarray(ptr, end));
-        }
+        //importObject.env.startHotReload();
+    })
+    .catch(error => {
+        console.log('Error loading WebAssembly: ', error);
+    });
+}
 
-        // Load and instantiate the WebAssembly module
-        async function loadWasm() {
-            console.log('Loading WebAssembly module...');
-            const importObject = {
-                env: {
-                    wasm_print: wasm_print,  
-                }
-            };
-            const compileOptions = {
-                builtins: ["js-string", "text-encoder"]
-            };
-            
-            fetch('./star.wasm')
-            .then(response => response.arrayBuffer())
-            .then(wasmBytes => WebAssembly.compile(wasmBytes, compileOptions))
-            .then(wasmModule => WebAssembly.instantiate(wasmModule, importObject))
-            .then(wasmInstance => {
-                const wasmRawExports = wasmInstance.exports;
-                window.wasmExports = {
-                    ...wasmRawExports,
-                    runtime: {
-                        Debug: {}
-                    }
-                };
-                window.runtime = wasmExports.runtime;
-
-                // Get the JS bindings  
-                const bindingsCode = readString(wasmExports.getJsBindings());
-                console.log('wasmExports: ', wasmExports);
-                console.log('bindingsCode: ', bindingsCode);
-                eval(bindingsCode);
-                
-                log('WASM reloaded at ' + new Date().toLocaleTimeString(), runtime.Debug.Scope.js, runtime.Debug.Level.info);
-                
-                if ((location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '') && !window.hmrStarted) {
-                    startHMR();
-                    window.hmrStarted = true;
-                }
-
-                if (wasmExports._start) {
-                    wasmExports._start(); 
-                }
-            })
-            .catch(error => {
-                console.log('Error loading WebAssembly: ', error);
-            });
-        }
-        
-        // Load WASM when page loads
-        loadWasm();
-    </script>
+loadWasm();
+</script>
 </body>
 </html>
