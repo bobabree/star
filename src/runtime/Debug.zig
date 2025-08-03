@@ -2,7 +2,10 @@ const builtin = @import("builtin");
 
 const IO = @import("IO.zig");
 const Mem = @import("Mem.zig");
+const UI = @import("UI.zig");
+const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
+
 const panicExtra = @import("std").debug.panicExtra;
 const print = @import("std").debug.print; // TODO: thread_local?
 
@@ -167,10 +170,54 @@ const Scope = enum(u8) {
 
     fn logMessage(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
         if (is_wasm) {
-            wasm_print(message.ptr, message.len, self.asHandle(), message_level.asHandle()); //
+            self.wasmPrint(message_level, message);
         } else {
             print(message_level.asAnsiColor() ++ "{s}\x1b[0m", .{message});
         }
+    }
+
+    const LogEntry = struct {
+        message: Utf8Buffer(256),
+        scope: []const u8,
+        level: []const u8,
+        color: []const u8,
+    };
+
+    var log_entries = FixedBuffer(LogEntry, 20).init(0);
+
+    fn wasmPrint(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
+        // Store entry (message is already formatted with scope/level)
+        if (log_entries.len < log_entries.capacity()) {
+            var entry = log_entries.addOne();
+
+            entry.message = Utf8Buffer(256).copy(message);
+            entry.scope = @tagName(self);
+            entry.level = @tagName(message_level);
+            entry.color = message_level.asHtmlColor();
+        }
+
+        var console_msg = Utf8Buffer(256).init();
+        console_msg.format("{s}", .{message});
+
+        var style = Utf8Buffer(256).init();
+        style.format("color: {s}; font-family: monospace;", .{message_level.asHtmlColor()});
+
+        switch (message_level) {
+            .err => console_error(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
+            .warn => console_warn(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
+            else => console_log(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
+        }
+
+        var full_html = Utf8Buffer(1024).init();
+        full_html.format("📁 Output:", .{});
+
+        for (log_entries.constSlice()) |entry| {
+            var log_html = Utf8Buffer(256).init();
+            log_html.format("<br><span style='color: {s}; font-family: monospace;'>{s}</span>", .{ entry.color, entry.message.constSlice() });
+            full_html.appendSlice(log_html.constSlice());
+        }
+
+        _ = UI.outputElement.innerHTML(full_html.constSlice());
     }
 
     fn logFn(
@@ -234,148 +281,9 @@ const Level = enum(u8) {
     }
 };
 
-const ascii = @import("std").ascii;
-const fmt = @import("std").fmt;
-const meta = @import("std").meta;
-
-// // Auto-generate exports using comptime reflection
-fn generateJsBindings(comptime ZigType: type, comptime namespace: []const u8) []const u8 {
-    @setEvalBranchQuota(10000);
-    comptime {
-        var buffer: [4096 * 2]u8 = undefined;
-        var len: usize = 0;
-
-        const enum_info = @typeInfo(ZigType).@"enum";
-        const enum_name = @typeName(ZigType);
-
-        const append = struct {
-            fn appendStr(buf: []u8, pos: *usize, str: []const u8) void {
-                @memcpy(buf[pos.* .. pos.* + str.len], str);
-                pos.* += str.len;
-            }
-        }.appendStr;
-
-        //  create the object
-        append(&buffer, &len, namespace);
-        append(&buffer, &len, ".");
-        append(&buffer, &len, enum_name);
-        append(&buffer, &len, " = {\n");
-
-        for (enum_info.fields) |field| {
-            append(&buffer, &len, "  ");
-            append(&buffer, &len, field.name);
-            append(&buffer, &len, ": {\n");
-            append(&buffer, &len, "    valueOf: () => ");
-
-            // Convert field value to string
-            const num_str = fmt.comptimePrint("{}", .{field.value});
-            append(&buffer, &len, num_str);
-            append(&buffer, &len, ",\n");
-
-            // add methods
-            for (meta.declarations(ZigType)) |decl| {
-                if (decl.name.len > 0) {
-                    const DeclType = @TypeOf(@field(ZigType, decl.name));
-                    if (@typeInfo(DeclType) == .@"fn") {
-                        append(&buffer, &len, "    ");
-                        append(&buffer, &len, decl.name);
-                        append(&buffer, &len, ": () => readString(wasmExports[\"");
-                        append(&buffer, &len, enum_name);
-                        append(&buffer, &len, "_");
-                        append(&buffer, &len, decl.name);
-                        append(&buffer, &len, "\"](");
-                        append(&buffer, &len, num_str);
-                        append(&buffer, &len, ")),\n");
-                    }
-                }
-            }
-
-            append(&buffer, &len, "  },\n");
-        }
-
-        append(&buffer, &len, "};\n");
-
-        for (enum_info.fields) |field| {
-            append(&buffer, &len, namespace);
-            append(&buffer, &len, "[\"");
-            append(&buffer, &len, enum_name);
-            append(&buffer, &len, ".");
-            append(&buffer, &len, field.name);
-            append(&buffer, &len, "\"] = ");
-            append(&buffer, &len, namespace);
-            append(&buffer, &len, ".");
-            append(&buffer, &len, enum_name);
-            append(&buffer, &len, ".");
-            append(&buffer, &len, field.name);
-            append(&buffer, &len, ";\n");
-        }
-
-        return buffer[0..len];
-    }
-}
-
-fn generateZigBindings(comptime ZigType: type) void {
-    const enum_name = @typeName(ZigType);
-    const enum_info = @typeInfo(ZigType).@"enum";
-
-    inline for (meta.declarations(ZigType)) |decl| {
-        if (@hasDecl(ZigType, decl.name)) {
-            const DeclType = @TypeOf(@field(ZigType, decl.name));
-            if (@typeInfo(DeclType) == .@"fn") {
-                const fn_info = @typeInfo(DeclType).@"fn";
-
-                if (fn_info.params.len == 1) {
-                    const fn_name = enum_name ++ "_" ++ decl.name;
-                    const exportFn = struct {
-                        fn get(val: u8) callconv(.c) usize {
-                            inline for (enum_info.fields) |field| {
-                                if (val == field.value) {
-                                    const result = @field(ZigType, decl.name)(@field(ZigType, field.name));
-
-                                    const ptr = switch (@TypeOf(result)) {
-                                        []const u8 => result.ptr,
-                                        [*:0]const u8 => result,
-                                        else => @compileError("Unsupported return type"),
-                                    };
-                                    return @intFromPtr(ptr);
-                                }
-                            }
-                            unreachable;
-                        }
-                    }.get;
-                    @export(&exportFn, .{ .name = fn_name });
-                }
-            }
-        }
-    }
-}
-
-comptime {
-    // Create universal zig bindings
-    generateZigBindings(Scope);
-    generateZigBindings(Level);
-}
-
-const js_bindings = blk: {
-    const scope_js = generateJsBindings(Scope, "window");
-    const level_js = generateJsBindings(Level, "window");
-
-    const total_len = scope_js.len + level_js.len;
-    var buffer: [total_len + 1]u8 = undefined;
-    var len: usize = 0;
-
-    @memcpy(buffer[len .. len + scope_js.len], scope_js);
-    len += scope_js.len;
-    @memcpy(buffer[len .. len + level_js.len], level_js);
-    len += level_js.len;
-    buffer[len] = 0; // Null terminate
-
-    break :blk buffer[0..len :0].*;
-};
-
-export fn getJsBindings() [*:0]const u8 {
-    return &js_bindings;
-}
+extern fn console_log(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
+extern fn console_warn(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
+extern fn console_error(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
 
 comptime {
     assert(@intFromEnum(Level.err) == 0);

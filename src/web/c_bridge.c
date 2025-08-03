@@ -21,6 +21,13 @@ void install_externref(__externref_t url_ref) {
     zig_install_externref(url_buffer, copy_length);
 }
 
+// TODO: move to Zig 
+// export fn zig_install_externref(url_ptr: [*]const u8, length: i32) void {
+//     const url_slice = url_ptr[0..@intCast(length)];
+//     const url = Utf8Buffer(256).copy(url_slice).constSlice();
+//     Debug.wasm.info("📦 Install package from externref URL: {s}", .{url});
+// }
+
 // TODO: uncomment this in the future. 
 // This is O(1) fn but not implemented by most browsers yet
 // int text_encoder_encodeStringIntoUTF8Array(__externref_t string, void* array, int start) 

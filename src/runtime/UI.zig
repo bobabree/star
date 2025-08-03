@@ -1,5 +1,6 @@
 const std = @import("std");
-const runtime = @import("runtime.zig");
+const Debug = @import("Debug.zig");
+const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 // Extern functions matching the HTML importObject.env
 extern fn createElement(tag_ptr: [*]const u8, tag_len: usize) u32;
@@ -14,7 +15,7 @@ extern fn setTextContent(id: u32, text_ptr: [*]const u8, text_len: usize) void;
 extern fn setClassName(id: u32, class_ptr: [*]const u8, class_len: usize) void;
 extern fn setId(id: u32, id_ptr: [*]const u8, id_len: usize) void;
 
-const Element = struct {
+pub const Element = struct {
     id: u32,
 
     pub fn innerHTML(self: Element, content: []const u8) Element {
@@ -127,24 +128,22 @@ const Events = struct {
 };
 
 // UI elements for later reference
-var outputElement: Element = undefined;
+pub var outputElement: Element = undefined; //TODO: lock?
 var installUrlElement: Element = undefined;
 var num1Element: Element = undefined;
 var num2Element: Element = undefined;
 
 // Event handlers
 fn runTests() void {
-    runtime.Debug.wasm.info("🧪 Running tests...", .{});
+    Debug.wasm.info("🧪 Running tests...", .{});
 
-    const result1 = add(2, 3);
-    const result2 = add(-1, 1);
+    const result1 = 2 + 3;
+    const result2 = -1 + 1;
 
     if (result1 == 5 and result2 == 0) {
-        _ = outputElement.innerHTML("✅ All tests passed! add(2,3)=5, add(-1,1)=0");
-        runtime.Debug.wasm.success("All tests passed!", .{});
+        Debug.wasm.success("✅ All tests passed!", .{});
     } else {
-        _ = outputElement.innerHTML("❌ Tests failed!");
-        runtime.Debug.wasm.err("Tests failed!", .{});
+        Debug.wasm.err("❌ Tests failed!", .{});
     }
 }
 
@@ -152,10 +151,7 @@ fn installPackage() void {
     var url_buffer: [256]u8 = undefined;
     const url = installUrlElement.getInputValue(&url_buffer);
 
-    _ = outputElement.innerHTML("📦 Installing package...");
-    runtime.Debug.wasm.info("Installing package from URL: {s}", .{url});
-
-    install(url.ptr, url.len);
+    Debug.wasm.info("📦 Installing package from URL: {s}", .{url});
 }
 
 fn calculate() void {
@@ -168,13 +164,9 @@ fn calculate() void {
     const num1 = std.fmt.parseInt(i32, num1_str, 10) catch 0;
     const num2 = std.fmt.parseInt(i32, num2_str, 10) catch 0;
 
-    const result = add(num1, num2);
+    const result = num1 + num2;
 
-    var result_buffer: [128]u8 = undefined;
-    const result_text = std.fmt.bufPrint(&result_buffer, "🔢 {d} + {d} = {d}", .{ num1, num2, result }) catch "Error";
-
-    _ = outputElement.innerHTML(result_text);
-    runtime.Debug.wasm.info("Calculated: {d} + {d} = {d}", .{ num1, num2, result });
+    Debug.wasm.info("Calculated: {d} + {d} = {d}", .{ num1, num2, result });
 }
 
 // Build the UI
@@ -217,26 +209,8 @@ pub fn buildUI() void {
     }));
 }
 
-// Exports
-pub export fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
+const Testing = @import("Testing.zig");
 
-export fn install(url_ptr: [*]const u8, url_len: usize) void {
-    const url_slice = url_ptr[0..url_len];
-    var url_buf = runtime.Utf8Buffer.Utf8Buffer(2048).copy(url_slice);
-    runtime.Debug.wasm.info("Install called with URL: {s}", .{url_buf.constSlice()});
-}
-
-export fn zig_install_externref(url_ptr: [*]const u8, length: i32) void {
-    const url_slice = url_ptr[0..@intCast(length)];
-    const url = runtime.Utf8Buffer.Utf8Buffer(256).copy(url_slice).constSlice();
-    runtime.Debug.wasm.info("📦 Install package from externref URL: {s}", .{url});
-}
-
-const Testing = runtime.Testing;
-
-test "add function works" {
-    try Testing.expect(add(2, 3) == 5);
-    try Testing.expect(add(-1, 1) == 0);
+test "wasm tests" {
+    runTests();
 }

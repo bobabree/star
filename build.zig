@@ -210,7 +210,9 @@ fn createPlatformArtifacts(
 
     // WASM-specific setup
     wasm.rdynamic = true;
-    wasm.addCSourceFile(.{ .file = b.path("src/web/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
+
+    // TODO: uncomment in the future if we need externref and refextern
+    //wasm.addCSourceFile(.{ .file = b.path("src/web/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
 
     if (platform.use_static) {
         exe.linkage = .static;

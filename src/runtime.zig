@@ -13,6 +13,7 @@ pub const Process = @import("runtime/Process.zig");
 pub const Testing = @import("runtime/Testing.zig");
 pub const Time = @import("runtime/Time.zig");
 pub const Thread = @import("runtime/Thread.zig");
+pub const UI = @import("runtime/UI.zig");
 pub const Utf8Buffer = @import("runtime/Utf8Buffer.zig");
 
 pub const wasm = @import("wasm.zig");
