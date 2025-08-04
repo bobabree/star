@@ -47,8 +47,12 @@ fn wasmSpawn(config: SpawnConfig, comptime function: anytype, args: anytype) Spa
 }
 
 export fn invoke_worker_func(func_id: u32) void {
+    Debug.wasm.warn("invoke_worker_func called with ID: {}", .{func_id});
     if (func_id < worker_count and worker_registry[func_id] != null) {
+        Debug.wasm.warn("Calling function at ID: {}", .{func_id});
         worker_registry[func_id].?();
+    } else {
+        Debug.wasm.warn("Function not found for ID: {}", .{func_id});
     }
 }
 
