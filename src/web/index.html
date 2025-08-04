@@ -10,7 +10,6 @@ async function loadWasm() {
     const importObject = {
         env: {
             getString: (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len)),
-
             console_log: (msg_ptr, msg_len, style_ptr, style_len) => 
                 console.log('%c' + importObject.env.getString(msg_ptr, msg_len), importObject.env.getString(style_ptr, style_len)),
             console_warn: (msg_ptr, msg_len, style_ptr, style_len) => 
@@ -20,7 +19,7 @@ async function loadWasm() {
 
             reload_wasm: () => loadWasm(),
 
-            workerFunction: function() {
+            workerTask: function() {
                 console.log('Worker started!');
                 let wasmInstance;
                 
@@ -28,23 +27,26 @@ async function loadWasm() {
                     console.log('Worker received message:', e.data.type);
                     if (e.data.type === 'init') {
                         const module = e.data.module;
+                        const workerId = e.data.workerId; 
                         
                         // Define all the stubs the worker needs
                         const workerImportObject = {
                             env: {
-                                getString: (memory, ptr, len) => new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)),
-
+                                getString: (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len)),
                                 console_log: function(msg_ptr, msg_len, style_ptr, style_len) {
-                                    const msg = workerImportObject.env.getString(wasmInstance.exports.memory, msg_ptr, msg_len);
-                                    console.log('Worker msg:', msg);
+                                    const msg = workerImportObject.env.getString(msg_ptr, msg_len);
+                                    const style = workerImportObject.env.getString(style_ptr, style_len);
+                                    console.log(`%c[worker#${workerId}]${msg}`, style);
                                 },
                                 console_warn: function(msg_ptr, msg_len, style_ptr, style_len) {
-                                    const msg = workerImportObject.env.getString(wasmInstance.exports.memory, msg_ptr, msg_len);
-                                    console.warn('Worker msg:', msg);
+                                    const msg = workerImportObject.env.getString(msg_ptr, msg_len);
+                                    const style = workerImportObject.env.getString(style_ptr, style_len);
+                                    console.warn(`%c[worker#${workerId}]${msg}`, style);
                                 },
                                 console_error: function(msg_ptr, msg_len, style_ptr, style_len) {
-                                    const msg = workerImportObject.env.getString(wasmInstance.exports.memory, msg_ptr, msg_len);
-                                    console.error('Worker msg:', msg);
+                                    const msg = workerImportObject.env.getString(msg_ptr, msg_len);
+                                    const style = workerImportObject.env.getString(style_ptr, style_len);
+                                    console.error(`%c[worker#${workerId}]${msg}`, style);
                                 },
 
                                 setTitle: function() {},
@@ -59,36 +61,36 @@ async function loadWasm() {
                                 setId: function() {},
                                 addStyleSheet: function() {},
                                 reload_wasm: function() {},
-                                create_web_worker: function() { return 0; },
+                                create_worker: function() { return 0; },
                                 worker_join: function() {}
                             }
                         };
                         
                         wasmInstance = await WebAssembly.instantiate(module, workerImportObject);
-                        const workerMemory = wasmInstance.exports.memory;
                         console.log('Worker WASM instance created');
                     } else if (e.data.type === 'run') {
-                        console.log('Worker running func_id:', e.data.func_id);
+                        console.log('Worker running task_id:', e.data.task_id);
                         console.log('Worker exports:', Object.keys(wasmInstance.exports));
-                        console.log('invoke_worker_func exists:', !!wasmInstance.exports.invoke_worker_func);
+                        console.log('invoke_worker_task exists:', !!wasmInstance.exports.invoke_worker_task);
                         
                         try {
-                            wasmInstance.exports.invoke_worker_func(e.data.func_id);
+                            wasmInstance.exports.invoke_worker_task(e.data.task_id);
                         } catch (error) {
-                            console.error('Error calling invoke_worker_func:', error);
+                            console.error('Error calling invoke_worker_task:', error);
                         }
                     }
                 };
             },
             
-            create_web_worker: (func_id) => {
-                const workerCode = `(${importObject.env.workerFunction.toString()})()`;
+            create_worker: (task_id) => {
+                const workerCode = `(${importObject.env.workerTask.toString()})()`;
                 const worker = new Worker(URL.createObjectURL(
                     new Blob([workerCode], { type: 'application/javascript' })
                 ));
+                const workerId = workers.length;
                 
-                worker.postMessage({ type: 'init', module: wasmModule });
-                worker.postMessage({ type: 'run', func_id: func_id });
+                worker.postMessage({ type: 'init', module: wasmModule, workerId: workerId });
+                worker.postMessage({ type: 'run', task_id: task_id });
                 
                 workers.push(worker);
                 return workers.length - 1;
