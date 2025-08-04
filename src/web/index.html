@@ -17,25 +17,63 @@ async function loadWasm() {
                 console.warn('%c' + importObject.env.getString(msg_ptr, msg_len), importObject.env.getString(style_ptr, style_len)),
             console_error: (msg_ptr, msg_len, style_ptr, style_len) => 
                 console.error('%c' + importObject.env.getString(msg_ptr, msg_len), importObject.env.getString(style_ptr, style_len)),
+
+            reload_wasm: () => loadWasm(),
+
+            workerFunction: function() {
+                let wasmInstance;
                 
-            startHotReload: () => {
-                if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
-                
-                let lastSize = 0;
-                setInterval(async () => {
-                    try {
-                        // Check file size
-                        const response = await fetch(`./star.wasm?check=${Date.now()}`, { method: 'HEAD' });
-                        const contentLength = response.headers.get('content-length');    
-                        if (contentLength && parseInt(contentLength) !== lastSize) {
-                            lastSize = parseInt(contentLength);
-                            console.warn('WASM file changed, hot reloading...');
-                            await loadWasm();
-                        }
-                    } catch (e) {
-                        console.error('HMR check failed:', e);
+                onmessage = async function(e) {
+                    if (e.data.type === 'init') {
+                        const module = e.data.module;
+                        
+                        // Define all the stubs the worker needs
+                        const workerImportObject = {
+                            env: {
+                                setTitle: function() {},
+                                createElement: function() { return 0; },
+                                appendChild: function() {},
+                                setAttribute: function() {},
+                                addEventListener: function() {},
+                                getValue: function() { return 0; },
+                                setInnerHTML: function() {},
+                                setTextContent: function() {},
+                                setClassName: function() {},
+                                setId: function() {},
+                                addStyleSheet: function() {},
+                                console_log: function() {},
+                                console_warn: function() {},
+                                console_error: function() {},
+                                reload_wasm: function() {},
+                                create_web_worker: function() { return 0; },
+                                worker_join: function() {}
+                            }
+                        };
+                        
+                        wasmInstance = await WebAssembly.instantiate(module, workerImportObject);
+                    } else if (e.data.type === 'run') {
+                        wasmInstance.exports.invoke_worker_func(e.data.func_id);
                     }
-                }, 500); 
+                };
+            },
+            
+            create_web_worker: (func_id) => {
+                const workerCode = `(${importObject.env.workerFunction.toString()})()`;
+                const worker = new Worker(URL.createObjectURL(
+                    new Blob([workerCode], { type: 'application/javascript' })
+                ));
+                
+                worker.postMessage({ type: 'init', module: wasmModule });
+                worker.postMessage({ type: 'run', func_id: func_id });
+                
+                workers.push(worker);
+                return workers.length - 1;
+            },
+
+            worker_join: (worker_id) => {
+                if (workers[worker_id]) {
+                    workers[worker_id].terminate();
+                }
             },
             
             createElement: (tag_ptr, tag_len) => {
@@ -115,7 +153,10 @@ async function loadWasm() {
     fetch('./star.wasm')
     .then(response => response.arrayBuffer())
     .then(wasmBytes => WebAssembly.compile(wasmBytes, compileOptions))
-    .then(wasmModule => WebAssembly.instantiate(wasmModule, importObject))
+    .then(wasmModule => {
+        window.wasmModule = wasmModule; 
+        return WebAssembly.instantiate(wasmModule, importObject);
+    })
     .then(wasmInstance => {
         console.log('Loading WebAssembly module...');
 
@@ -123,6 +164,7 @@ async function loadWasm() {
             ...wasmInstance.exports,
         };
         window.elements = [null, document.body];
+        window.workers = [];
 
         if (wasmExports._start) {
             console.log('wasmExports: ', window.wasmExports);
