@@ -1,4 +1,5 @@
 const thread = @import("std").Thread;
+const m = @import("std");
 const Debug = @import("Debug.zig");
 
 const Thread = if (Debug.is_wasm) WasmThread else thread;
@@ -29,11 +30,12 @@ const WasmThread = struct {
 extern fn create_thread(task_id: u32) u32;
 extern fn thread_join(thread_id: u32) void;
 
-fn wasmSpawn(config: SpawnConfig, comptime task: anytype, args: anytype) SpawnError!WasmThread {
+fn wasmSpawn(config: SpawnConfig, comptime _: anytype, args: anytype) SpawnError!WasmThread {
     _ = config;
     _ = args;
 
-    const task_id = task.getTaskId();
+    // TODO: For now, just use hot_reload as default task
+    const task_id = @intFromEnum(TaskType.hot_reload);
     const thread_id = create_thread(task_id);
     return WasmThread{ .thread_id = thread_id };
 }
@@ -93,6 +95,10 @@ pub const TaskType = enum(u32) {
         Debug.wasm.warn("Network task running", .{});
     }
 };
+
+pub fn hotReloadTask() void {
+    TaskType.hot_reload.execute();
+}
 
 fn checkWasmSize() !void {
     // var client = std.http.Client{ .allocator = allocator };

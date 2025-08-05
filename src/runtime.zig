@@ -8,6 +8,7 @@ pub const Heap = @import("runtime/Heap.zig");
 pub const Http = @import("runtime/Http.zig");
 pub const IO = @import("runtime/IO.zig");
 pub const Mem = @import("runtime/Mem.zig");
+pub const MpscChannel = @import("runtime/MpscChannel.zig");
 pub const Net = @import("runtime/Net.zig");
 pub const Process = @import("runtime/Process.zig");
 pub const Testing = @import("runtime/Testing.zig");

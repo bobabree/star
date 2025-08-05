@@ -198,6 +198,7 @@ pub const Server = struct {
         defer allocator.free(wasm_data);
 
         const size_mb = @as(f64, @floatFromInt(wasm_data.len)) / (1024.0 * 1024.0);
+        const size_kb = @as(f64, @floatFromInt(wasm_data.len)) / 1024.0;
 
         try request.respond(wasm_data, .{
             .status = .ok,
@@ -209,7 +210,7 @@ pub const Server = struct {
         });
 
         if (request.head.method != .HEAD) {
-            Debug.server.info("Served WASM ({d:.2} MB)\n", .{size_mb});
+            Debug.server.info("Served WASM ({d:.2} MB / {d:.0} KB)\n", .{ size_mb, size_kb });
         }
     }
 

@@ -36,7 +36,7 @@ fn startHotReload() void {
         Debug.wasm.info("Hot reload enabled (polling mode)", .{});
 
         // Spawn background thread for polling
-        const thread = Thread.spawn(.{}, Thread.TaskType.hot_reload, .{}) catch |err| {
+        const thread = Thread.spawn(.{}, Thread.hotReloadTask, .{}) catch |err| {
             Debug.wasm.err("Failed to spawn hot reload thread: {}", .{err});
             return;
         };

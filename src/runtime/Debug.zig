@@ -7,6 +7,7 @@ const Thread = @import("Thread.zig");
 const UI = @import("UI.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
+const dumpCurrentStackTrace = @import("std").debug.dumpCurrentStackTrace;
 const panicExtra = @import("std").debug.panicExtra;
 const print = @import("std").debug.print; // TODO: thread_local?
 
@@ -42,7 +43,7 @@ const scope_levels: []const ScopeLevel = &.{
 
 // Thread-local scope management
 threadlocal var current_scope: Scope = Scope.default;
-threadlocal var current_task: Thread.TaskType = undefined;
+threadlocal var current_task: Thread.TaskType = Thread.TaskType.default;
 
 pub fn setThreadScope(scope: Scope, task: Thread.TaskType) void {
     current_scope = scope;
@@ -59,19 +60,19 @@ pub fn getCurrentScope() Scope {
 
 pub fn assert(condition: bool) void {
     switch (getCurrentScope()) {
-        inline else => |s| s.assert(condition),
+        inline else => |s| s.assert(condition, @returnAddress()),
     }
 }
 
 pub fn panic(comptime format: []const u8, args: anytype) noreturn {
     switch (getCurrentScope()) {
-        inline else => |scope| scope.panic(format, args),
+        inline else => |scope| scope.panic(format, args, @returnAddress()),
     }
 }
 
 pub fn panicAssert(condition: bool, comptime format: []const u8, args: anytype) void {
     switch (getCurrentScope()) {
-        inline else => |scope| scope.panicAssert(condition, format, args),
+        inline else => |scope| scope.panicAssert(condition, format, args, @returnAddress()),
     }
 }
 
@@ -139,25 +140,41 @@ const Scope = enum(u8) {
         self.log(Level.debug, format, args);
     }
 
-    pub fn assert(comptime self: Scope, condition: bool) void {
+    pub fn assert(comptime self: Scope, condition: bool, ret_addr: usize) void {
         if (!condition) {
-            self.err("assertion failed at {s}:{d}", .{ @src().file, @src().line });
+            self.err("assertion failed at 0x{x}", .{ret_addr});
+            if (is_wasm) {
+                self.dumpWasmStack();
+            }
             unreachable; // assertion failure
         }
     }
 
-    pub fn panic(comptime self: Scope, comptime format: []const u8, args: anytype) noreturn {
+    pub fn panic(comptime self: Scope, comptime format: []const u8, args: anytype, ret_addr: usize) noreturn {
         @branchHint(.cold);
         self.err(format, args);
+        self.err("panic at 0x{x}", .{ret_addr});
+        if (is_wasm) {
+            self.dumpWasmStack();
+        }
         panicExtra(@returnAddress(), format, args);
     }
 
-    pub fn panicAssert(comptime self: Scope, condition: bool, comptime format: []const u8, args: anytype) void {
+    pub fn panicAssert(comptime self: Scope, condition: bool, comptime format: []const u8, args: anytype, ret_addr: usize) void {
         if (!condition) {
             @branchHint(.cold);
-            self.err("assertion failed at {s}:{d}", .{ @src().file, @src().line });
-            self.panic(format, args);
-            unreachable; // assertion failure
+            self.panic(format, args, ret_addr);
+            unreachable; // panic assertion failure
+        }
+    }
+
+    fn dumpWasmStack(comptime self: Scope) void {
+        // TODO: WASM may need inline assembly
+        var current_frame = @frameAddress();
+        var i: u8 = 0;
+        while (i < 10) : (i += 1) {
+            self.err("Frame {}: 0x{x}", .{ i, current_frame });
+            current_frame += @sizeOf(usize);
         }
     }
 
@@ -222,11 +239,11 @@ const Scope = enum(u8) {
         var full_html = Utf8Buffer(1024).init();
         full_html.format("📁 Output:", .{});
 
-        for (log_entries.constSlice()) |entry| {
-            var log_html = Utf8Buffer(256).init();
-            log_html.format("<br><span style='color: {s}; font-family: monospace;'>{s}</span>", .{ entry.color, entry.message.constSlice() });
-            full_html.appendSlice(log_html.constSlice());
-        }
+        // for (log_entries.constSlice()) |entry| {
+        //     var log_html = Utf8Buffer(256).init();
+        //     log_html.format("<br><span style='color: {s}; font-family: monospace;'>{s}</span>", .{ entry.color, entry.message.constSlice() });
+        //     full_html.appendSlice(log_html.constSlice());
+        // }
 
         _ = UI.outputElement.innerHTML(full_html.constSlice());
     }

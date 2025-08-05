@@ -20,11 +20,9 @@ async function loadWasm() {
             reload_wasm: () => loadWasm(),
 
             threadTask: function() {
-                console.log('New thread started!');
                 let wasmInstance;
                 
                 onmessage = async function(e) {
-                    console.log('Thread received message:', e.data.type);
                     if (e.data.type === 'init') {
                         const module = e.data.module;
                         const threadId = e.data.threadId; 
@@ -67,12 +65,7 @@ async function loadWasm() {
                         };
                         
                         wasmInstance = await WebAssembly.instantiate(module, threadImportObject);
-                        console.log('WASM thread created');
                     } else if (e.data.type === 'run') {
-                        console.log('Thread running task_id:', e.data.task_id);
-                        console.log('Thread exports:', Object.keys(wasmInstance.exports));
-                        console.log('invoke_thread_task exists:', !!wasmInstance.exports.invoke_thread_task);
-                        
                         try {
                             wasmInstance.exports.invoke_thread_task(e.data.task_id);
                         } catch (error) {

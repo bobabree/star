@@ -2,18 +2,76 @@ const std = @import("std");
 const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
-// Extern functions matching the HTML importObject.env
-extern fn createElement(tag_ptr: [*]const u8, tag_len: usize) u32;
-extern fn appendChild(parent: u32, child: u32) void;
-extern fn setAttribute(id: u32, name_ptr: [*]const u8, name_len: usize, value_ptr: [*]const u8, value_len: usize) void;
-extern fn addEventListener(id: u32, event_ptr: [*]const u8, event_len: usize, callback_id: u32) void;
-extern fn getValue(id: u32, buffer_ptr: [*]u8, buffer_len: usize) usize;
-extern fn setTitle(title_ptr: [*]const u8, title_len: usize) void;
-extern fn addStyleSheet(css_ptr: [*]const u8, css_len: usize) void;
-extern fn setInnerHTML(id: u32, html_ptr: [*]const u8, html_len: usize) void;
-extern fn setTextContent(id: u32, text_ptr: [*]const u8, text_len: usize) void;
-extern fn setClassName(id: u32, class_ptr: [*]const u8, class_len: usize) void;
-extern fn setId(id: u32, id_ptr: [*]const u8, id_len: usize) void;
+// Extern functions for WASM, stubs for testing
+const createElement = if (Debug.is_wasm) struct {
+    extern fn createElement(tag_ptr: [*]const u8, tag_len: usize) u32;
+}.createElement else (struct {
+    fn f(_: [*]const u8, _: usize) u32 {
+        return 0;
+    }
+}).f;
+
+const appendChild = if (Debug.is_wasm) struct {
+    extern fn appendChild(parent: u32, child: u32) void;
+}.appendChild else (struct {
+    fn f(_: u32, _: u32) void {}
+}).f;
+
+const setAttribute = if (Debug.is_wasm) struct {
+    extern fn setAttribute(id: u32, name_ptr: [*]const u8, name_len: usize, value_ptr: [*]const u8, value_len: usize) void;
+}.setAttribute else (struct {
+    fn f(_: u32, _: [*]const u8, _: usize, _: [*]const u8, _: usize) void {}
+}).f;
+
+const addEventListener = if (Debug.is_wasm) struct {
+    extern fn addEventListener(id: u32, event_ptr: [*]const u8, event_len: usize, callback_id: u32) void;
+}.addEventListener else (struct {
+    fn f(_: u32, _: [*]const u8, _: usize, _: u32) void {}
+}).f;
+
+const getValue = if (Debug.is_wasm) struct {
+    extern fn getValue(id: u32, buffer_ptr: [*]u8, buffer_len: usize) usize;
+}.getValue else (struct {
+    fn f(_: u32, _: [*]u8, _: usize) usize {
+        return 0;
+    }
+}).f;
+
+const setTitle = if (Debug.is_wasm) struct {
+    extern fn setTitle(title_ptr: [*]const u8, title_len: usize) void;
+}.setTitle else (struct {
+    fn f(_: [*]const u8, _: usize) void {}
+}).f;
+
+const addStyleSheet = if (Debug.is_wasm) struct {
+    extern fn addStyleSheet(css_ptr: [*]const u8, css_len: usize) void;
+}.addStyleSheet else (struct {
+    fn f(_: [*]const u8, _: usize) void {}
+}).f;
+
+const setInnerHTML = if (Debug.is_wasm) struct {
+    extern fn setInnerHTML(id: u32, html_ptr: [*]const u8, html_len: usize) void;
+}.setInnerHTML else (struct {
+    fn f(_: u32, _: [*]const u8, _: usize) void {}
+}).f;
+
+const setTextContent = if (Debug.is_wasm) struct {
+    extern fn setTextContent(id: u32, text_ptr: [*]const u8, text_len: usize) void;
+}.setTextContent else (struct {
+    fn f(_: u32, _: [*]const u8, _: usize) void {}
+}).f;
+
+const setClassName = if (Debug.is_wasm) struct {
+    extern fn setClassName(id: u32, class_ptr: [*]const u8, class_len: usize) void;
+}.setClassName else (struct {
+    fn f(_: u32, _: [*]const u8, _: usize) void {}
+}).f;
+
+const setId = if (Debug.is_wasm) struct {
+    extern fn setId(id: u32, id_ptr: [*]const u8, id_len: usize) void;
+}.setId else (struct {
+    fn f(_: u32, _: [*]const u8, _: usize) void {}
+}).f;
 
 pub const Element = struct {
     id: u32,

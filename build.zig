@@ -84,53 +84,17 @@ fn createPlatformArtifacts(
     folder_name: []const u8,
     install_step: ?*std.Build.Step,
 ) void {
-    // Create runtime module (no dependencies)
-    const runtime_module = b.createModule(.{
-        .root_source_file = b.path("src/runtime.zig"),
-        .target = target,
-        .optimize = optimize,
-        .sanitize_c = .full,
-        .error_tracing = optimize == .Debug,
-        .single_threaded = false,
-        .strip = optimize != .Debug, // Strip for release builds
-        .unwind_tables = .sync,
-    });
+    const runtime_module = b.createModule(createModuleOptions(b.path("src/runtime.zig"), target, optimize));
 
-    const exe_module = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-        .sanitize_c = .full,
-        .error_tracing = optimize == .Debug,
-        .single_threaded = false,
-        .strip = optimize != .Debug,
-        .unwind_tables = .sync,
-        .imports = &.{
-            .{ .name = "runtime", .module = runtime_module },
-        },
-    });
+    const exe_module = b.createModule(createModuleOptions(b.path("src/main.zig"), target, optimize));
+    exe_module.addImport("runtime", runtime_module);
 
-    const wasm_module = b.createModule(.{
-        .root_source_file = b.path("src/wasm.zig"),
-        .target = b.resolveTargetQuery(.{
-            .cpu_arch = .wasm32,
-            .os_tag = .freestanding,
-            .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{
-                .reference_types,
-                .bulk_memory,
-                //.atomics,
-            }),
-        }),
-        .optimize = optimize,
-        .sanitize_c = .full, // Only for debug
-        .error_tracing = optimize == .Debug,
-        .single_threaded = false,
-        .strip = optimize != .Debug,
-        .unwind_tables = .sync,
-        .imports = &.{
-            .{ .name = "runtime", .module = runtime_module },
-        },
-    });
+    const wasm_module = b.createModule(createModuleOptions(b.path("src/wasm.zig"), b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .cpu_model = .{ .explicit = &std.Target.wasm.cpu.mvp },
+    }), optimize));
+    wasm_module.addImport("runtime", runtime_module);
 
     const exe = b.addExecutable(.{ .name = "star", .root_module = exe_module });
     const wasm = b.addExecutable(.{ .name = "star", .root_module = wasm_module });
@@ -208,8 +172,48 @@ fn createPlatformArtifacts(
         }
     }
 
-    // WASM-specific setup
-    wasm.rdynamic = true;
+    // Link-time optimizations
+    wasm.link_function_sections = true;
+    wasm.link_data_sections = true;
+    wasm.link_gc_sections = true;
+    wasm.lto = .full;
+    wasm.want_lto = true;
+
+    // Strip symbols
+    wasm.discard_local_symbols = true;
+    wasm.rdynamic = true; // TODO: Don't export all symbols
+    wasm.dll_export_fns = false;
+
+    // bundlers
+    wasm.bundle_compiler_rt = true;
+    wasm.bundle_ubsan_rt = false;
+
+    // WASM-specific memory settings
+    wasm.import_memory = false;
+    wasm.export_memory = false;
+    wasm.import_symbols = false;
+    wasm.import_table = false;
+    wasm.export_table = false;
+    wasm.shared_memory = false;
+    wasm.initial_memory = 65536 * 2;
+    wasm.max_memory = 65536 * 4;
+    wasm.global_base = 1024;
+
+    // Stack size
+    wasm.stack_size = 16384; // 16KB stack
+
+    // Entry point
+    wasm.entry = .disabled;
+
+    // Disable unnecessary features
+    wasm.link_eh_frame_hdr = false;
+    wasm.link_emit_relocs = false;
+    wasm.link_z_relro = false;
+    wasm.link_z_lazy = true;
+    wasm.pie = false;
+
+    // Compression
+    wasm.compress_debug_sections = .zstd;
 
     // TODO: uncomment in the future if we need externref and refextern
     //wasm.addCSourceFile(.{ .file = b.path("src/web/c_bridge.c"), .flags = &[_][]const u8{ "-mreference-types", "-mbulk-memory" } });
@@ -227,4 +231,37 @@ fn createPlatformArtifacts(
         step.dependOn(&exe_install.step);
         step.dependOn(&wasm_install.step);
     }
+}
+fn createModuleOptions(
+    root_source_file: std.Build.LazyPath,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) std.Build.Module.CreateOptions {
+    const is_wasm = target.result.cpu.arch.isWasm();
+    const is_release = optimize != .Debug;
+    const minimal = is_wasm or is_release;
+
+    return .{
+        .root_source_file = root_source_file,
+        .target = target,
+        .optimize = if (minimal) .ReleaseSmall else optimize,
+        .link_libc = if (minimal) false else null,
+        .link_libcpp = false,
+        .single_threaded = false,
+        .strip = minimal,
+        .unwind_tables = if (minimal) .none else .sync,
+        .dwarf_format = if (minimal) null else .@"64",
+        .code_model = if (minimal) .small else .default,
+        .stack_protector = false, // Not supported on Mac/Windows
+        .stack_check = false, // Not supported on Mac/Windows
+        .sanitize_c = if (minimal) .off else .full,
+        .sanitize_thread = false, // Not supported on Mac/Windows
+        .fuzz = false,
+        .valgrind = false,
+        .pic = if (is_wasm) false else null,
+        .red_zone = if (minimal) false else null,
+        .omit_frame_pointer = minimal,
+        .error_tracing = !minimal,
+        .no_builtin = false,
+    };
 }
