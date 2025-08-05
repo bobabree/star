@@ -14,10 +14,10 @@ pub fn spawn(config: SpawnConfig, comptime function: anytype, args: anytype) Spa
 }
 
 const WasmThread = struct {
-    worker_id: u32,
+    thread_id: u32,
 
     pub fn join(self: WasmThread) void {
-        worker_join(self.worker_id);
+        thread_join(self.thread_id);
     }
 
     pub fn detach(self: WasmThread) void {
@@ -26,24 +26,26 @@ const WasmThread = struct {
     }
 };
 
-extern fn create_worker(task_id: u32) u32;
-extern fn worker_join(worker_id: u32) void;
+extern fn create_thread(task_id: u32) u32;
+extern fn thread_join(thread_id: u32) void;
 
 fn wasmSpawn(config: SpawnConfig, comptime task: anytype, args: anytype) SpawnError!WasmThread {
     _ = config;
     _ = args;
 
     const task_id = task.getTaskId();
-    const worker_id = create_worker(task_id);
-    return WasmThread{ .worker_id = worker_id };
+    const thread_id = create_thread(task_id);
+    return WasmThread{ .thread_id = thread_id };
 }
 
-export fn invoke_worker_task(task_id: u32) void {
-    Debug.wasm.warn("invoke_worker_task called with task_id: {}", .{task_id});
+export fn invoke_thread_task(task_id: u32) void {
+    Debug.wasm.warn("invoke_thread_task called with task_id: {}", .{task_id});
     const type_info = @typeInfo(TaskType);
     inline for (type_info.@"enum".fields) |field| {
         if (task_id == field.value) {
-            @as(TaskType, @enumFromInt(field.value)).execute();
+            const task = @as(TaskType, @enumFromInt(field.value));
+            Debug.setThreadScope(.wasm, task);
+            task.execute();
             return;
         }
     }
@@ -56,6 +58,7 @@ pub const TaskType = enum(u32) {
     hot_reload = 0,
     background_sync = 1,
     network_task = 2,
+    default = 3,
 
     pub fn getTaskId(comptime self: TaskType) u32 {
         return @intFromEnum(self);
@@ -63,7 +66,7 @@ pub const TaskType = enum(u32) {
 
     pub fn execute(comptime self: TaskType) void {
         switch (self) {
-            .hot_reload => self.hotReloadLoop(),
+            .hot_reload, .default => self.hotReloadLoop(),
             .background_sync => self.backgroundSyncLoop(),
             .network_task => self.networkTaskLoop(),
         }

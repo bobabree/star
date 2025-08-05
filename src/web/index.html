@@ -19,34 +19,34 @@ async function loadWasm() {
 
             reload_wasm: () => loadWasm(),
 
-            workerTask: function() {
-                console.log('Worker started!');
+            threadTask: function() {
+                console.log('New thread started!');
                 let wasmInstance;
                 
                 onmessage = async function(e) {
-                    console.log('Worker received message:', e.data.type);
+                    console.log('Thread received message:', e.data.type);
                     if (e.data.type === 'init') {
                         const module = e.data.module;
-                        const workerId = e.data.workerId; 
+                        const threadId = e.data.threadId; 
                         
-                        // Define all the stubs the worker needs
-                        const workerImportObject = {
+                        // Define all the stubs the thread needs
+                        const threadImportObject = {
                             env: {
                                 getString: (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len)),
                                 console_log: function(msg_ptr, msg_len, style_ptr, style_len) {
-                                    const msg = workerImportObject.env.getString(msg_ptr, msg_len);
-                                    const style = workerImportObject.env.getString(style_ptr, style_len);
-                                    console.log(`%c[worker#${workerId}]${msg}`, style);
+                                    const msg = threadImportObject.env.getString(msg_ptr, msg_len);
+                                    const style = threadImportObject.env.getString(style_ptr, style_len);
+                                    console.log('%c' + msg, style);
                                 },
                                 console_warn: function(msg_ptr, msg_len, style_ptr, style_len) {
-                                    const msg = workerImportObject.env.getString(msg_ptr, msg_len);
-                                    const style = workerImportObject.env.getString(style_ptr, style_len);
-                                    console.warn(`%c[worker#${workerId}]${msg}`, style);
+                                    const msg = threadImportObject.env.getString(msg_ptr, msg_len);
+                                    const style = threadImportObject.env.getString(style_ptr, style_len);
+                                    console.warn('%c' + msg, style);
                                 },
                                 console_error: function(msg_ptr, msg_len, style_ptr, style_len) {
-                                    const msg = workerImportObject.env.getString(msg_ptr, msg_len);
-                                    const style = workerImportObject.env.getString(style_ptr, style_len);
-                                    console.error(`%c[worker#${workerId}]${msg}`, style);
+                                    const msg = threadImportObject.env.getString(msg_ptr, msg_len);
+                                    const style = threadImportObject.env.getString(style_ptr, style_len);
+                                    console.error('%c' + msg, style);
                                 },
 
                                 setTitle: function() {},
@@ -61,44 +61,44 @@ async function loadWasm() {
                                 setId: function() {},
                                 addStyleSheet: function() {},
                                 reload_wasm: function() {},
-                                create_worker: function() { return 0; },
-                                worker_join: function() {}
+                                create_thread: function() { return 0; },
+                                thread_join: function() {}
                             }
                         };
                         
-                        wasmInstance = await WebAssembly.instantiate(module, workerImportObject);
-                        console.log('Worker WASM instance created');
+                        wasmInstance = await WebAssembly.instantiate(module, threadImportObject);
+                        console.log('WASM thread created');
                     } else if (e.data.type === 'run') {
-                        console.log('Worker running task_id:', e.data.task_id);
-                        console.log('Worker exports:', Object.keys(wasmInstance.exports));
-                        console.log('invoke_worker_task exists:', !!wasmInstance.exports.invoke_worker_task);
+                        console.log('Thread running task_id:', e.data.task_id);
+                        console.log('Thread exports:', Object.keys(wasmInstance.exports));
+                        console.log('invoke_thread_task exists:', !!wasmInstance.exports.invoke_thread_task);
                         
                         try {
-                            wasmInstance.exports.invoke_worker_task(e.data.task_id);
+                            wasmInstance.exports.invoke_thread_task(e.data.task_id);
                         } catch (error) {
-                            console.error('Error calling invoke_worker_task:', error);
+                            console.error('Error calling invoke_thread_task:', error);
                         }
                     }
                 };
             },
             
-            create_worker: (task_id) => {
-                const workerCode = `(${importObject.env.workerTask.toString()})()`;
-                const worker = new Worker(URL.createObjectURL(
-                    new Blob([workerCode], { type: 'application/javascript' })
+            create_thread: (task_id) => {
+                const threadTask = `(${importObject.env.threadTask.toString()})()`;
+                const thread = new Worker(URL.createObjectURL(
+                    new Blob([threadTask], { type: 'application/javascript' })
                 ));
-                const workerId = workers.length;
+                const threadId = threads.length;
                 
-                worker.postMessage({ type: 'init', module: wasmModule, workerId: workerId });
-                worker.postMessage({ type: 'run', task_id: task_id });
+                thread.postMessage({ type: 'init', module: wasmModule, threadId: threadId });
+                thread.postMessage({ type: 'run', task_id: task_id });
                 
-                workers.push(worker);
-                return workers.length - 1;
+                threads.push(thread);
+                return threadId;
             },
 
-            worker_join: (worker_id) => {
-                if (workers[worker_id]) {
-                    workers[worker_id].terminate();
+            thread_join: (thread_id) => {
+                if (threads[thread_id]) {
+                    threads[thread_id].terminate();
                 }
             },
             
@@ -190,7 +190,7 @@ async function loadWasm() {
             ...wasmInstance.exports,
         };
         window.elements = [null, document.body];
-        window.workers = [];
+        window.threads = [];
 
         if (wasmExports._start) {
             console.log('wasmExports: ', window.wasmExports);

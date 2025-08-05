@@ -1,9 +1,10 @@
 const builtin = @import("builtin");
 
+const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const IO = @import("IO.zig");
 const Mem = @import("Mem.zig");
+const Thread = @import("Thread.zig");
 const UI = @import("UI.zig");
-const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 const panicExtra = @import("std").debug.panicExtra;
@@ -41,8 +42,18 @@ const scope_levels: []const ScopeLevel = &.{
 
 // Thread-local scope management
 threadlocal var current_scope: Scope = Scope.default;
+threadlocal var current_task: Thread.TaskType = undefined;
 
-fn getCurrentScope() Scope {
+pub fn setThreadScope(scope: Scope, task: Thread.TaskType) void {
+    current_scope = scope;
+    current_task = task;
+}
+
+fn getCurrentTask() Thread.TaskType {
+    return current_task;
+}
+
+pub fn getCurrentScope() Scope {
     return if (@inComptime()) Scope.default else current_scope;
 }
 
@@ -72,7 +83,7 @@ const Scope = enum(u8) {
     wasm = 1,
     server = 2,
     ios = 3,
-    default = 4,
+    default = 5,
 
     pub fn asHandle(comptime self: Scope) [*:0]const u8 {
         const handle = comptime (@typeName(@This()) ++ "." ++ self.asTagName());
@@ -165,7 +176,7 @@ const Scope = enum(u8) {
         inline for (scope_levels) |scope_level| {
             if (scope_level.scope == self) return @intFromEnum(message_level) <= @intFromEnum(scope_level.level);
         }
-        return message_level <= level;
+        return @intFromEnum(message_level) <= @intFromEnum(level);
     }
 
     fn logMessage(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
@@ -233,9 +244,13 @@ const Scope = enum(u8) {
             "[" ++ @tagName(self) ++ "][" ++ @tagName(message_level) ++ "] ";
 
         var buffer = Utf8Buffer(1024).init();
-        buffer.format(prefix ++ format, args);
-        const message = buffer.constSlice();
+        const task = getCurrentTask();
+        if (task == Thread.TaskType.default)
+            buffer.format(prefix ++ format, args)
+        else
+            buffer.format("[{s}]" ++ prefix ++ format, .{@tagName(task)} ++ args);
 
+        const message = buffer.constSlice();
         self.logMessage(message_level, message);
     }
 };
