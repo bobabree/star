@@ -59,20 +59,6 @@ pub fn build(b: *std.Build) void {
     // # Direct file testing
     // zig test runtime/server.zig       # Test specific file before commit (broken for some reason)
     // zig test runtime/runtime.zig      # Test runtime module before commit
-
-    //
-    // const runtime_module = b.createModule(.{
-    //     .root_source_file = b.path("src/runtime.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    //     .sanitize_c = true, // AddressSanitizer + UBSan + LeakSanitizer
-    //     .stack_protector = true, // TODO: Window needs libc for this. WASM does not need stack protector. Stack canaries to detect buffer overflows
-    //     .error_tracing = true, // Enhanced error stack traces
-    //     .single_threaded = false, // no single-threaded
-    //     .strip = false, // Keep debug symbols
-    //     .unwind_tables = .sync, // Exception handling tables
-    //     .linkage = .static if platform.use_static
-    // });
 }
 
 fn createPlatformArtifacts(
@@ -196,7 +182,7 @@ fn createPlatformArtifacts(
     wasm.export_table = false;
     wasm.shared_memory = false;
     wasm.initial_memory = 65536 * 2;
-    wasm.max_memory = 65536 * 4;
+    wasm.max_memory = 65536 * 2;
     wasm.global_base = 1024;
 
     // Stack size
@@ -227,11 +213,23 @@ fn createPlatformArtifacts(
     const exe_install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
     const wasm_install = b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
 
+    const optimize_wasm = b.addSystemCommand(&.{
+        "wasm-opt",
+        b.getInstallPath(.{ .custom = folder_name }, "star.wasm"),
+        "-Oz",
+        "--converge",
+        "-o",
+        b.getInstallPath(.{ .custom = folder_name }, "star.wasm"),
+    });
+    optimize_wasm.step.dependOn(&wasm_install.step);
+    optimize_wasm.failing_to_execute_foreign_is_an_error = false;
+
     if (install_step) |step| {
         step.dependOn(&exe_install.step);
-        step.dependOn(&wasm_install.step);
+        step.dependOn(&optimize_wasm.step);
     }
 }
+
 fn createModuleOptions(
     root_source_file: std.Build.LazyPath,
     target: std.Build.ResolvedTarget,
