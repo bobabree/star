@@ -1,15 +1,16 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
-// Extern functions for WASM, stubs for testing
-// const appendChild = if (Debug.is_wasm) struct {
-//     extern fn appendChild(parent: u32, child: u32) void;
-// }.appendChild else (struct {
-//     fn f(_: u32, _: u32) void {}
-// }).f;
-
-extern fn dom_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
+// Extern functions for WASM w/ conditional stubs for testing
+const dom_op = if (Debug.is_wasm) struct {
+    extern fn dom_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
+}.dom_op else (struct {
+    fn f(_: u32, _: u32, _: ?[*]const u8, _: u32, _: ?[*]const u8, _: u32) u32 {
+        return 0;
+    }
+}).f;
 
 // DOM Operation enum
 const DomOp = enum(u32) {
@@ -25,66 +26,106 @@ const DomOp = enum(u32) {
     setTitle = 9,
     addStyleSheet = 10,
     reloadWasm = 11,
-    createThread = 12,
-    threadJoin = 13,
+
+    pub fn invoke(comptime self: DomOp, args: anytype) u32 {
+        return switch (self) {
+            .createElement => dom_op(@intFromEnum(self), 0, args.tag.ptr, @intCast(args.tag.len), null, 0),
+            .appendChild => dom_op(@intFromEnum(self), args.parent_id, @ptrFromInt(@as(usize, args.child_id)), 0, null, 0),
+            .setAttribute => dom_op(@intFromEnum(self), args.id, args.name.ptr, @intCast(args.name.len), args.value.ptr, @intCast(args.value.len)),
+            .addEventListener => dom_op(@intFromEnum(self), args.id, args.event.ptr, @intCast(args.event.len), @ptrFromInt(@as(usize, args.callback_id)), 0),
+            .getValue => dom_op(@intFromEnum(self), args.id, null, 0, args.buffer.ptr, @intCast(args.buffer.len)),
+            .setInnerHTML => dom_op(@intFromEnum(self), args.id, args.html.ptr, @intCast(args.html.len), null, 0),
+            .setTextContent => dom_op(@intFromEnum(self), args.id, args.text.ptr, @intCast(args.text.len), null, 0),
+            .setClassName => dom_op(@intFromEnum(self), args.id, args.class_name.ptr, @intCast(args.class_name.len), null, 0),
+            .setId => dom_op(@intFromEnum(self), args.id, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
+            .setTitle => dom_op(@intFromEnum(self), 0, args.title.ptr, @intCast(args.title.len), null, 0),
+            .addStyleSheet => dom_op(@intFromEnum(self), 0, args.css.ptr, @intCast(args.css.len), null, 0),
+            .reloadWasm => dom_op(@intFromEnum(self), 0, null, 0, null, 0),
+        };
+    }
 };
 
 fn createElement(tag: []const u8) u32 {
-    return dom_op(@intFromEnum(DomOp.createElement), 0, tag.ptr, @intCast(tag.len), null, 0);
+    return DomOp.createElement.invoke(.{ .tag = tag });
 }
 
 fn appendChild(parent_id: u32, child_id: u32) void {
-    // Pass child_id as the first pointer parameter (hacky but works)
-    _ = dom_op(@intFromEnum(DomOp.appendChild), parent_id, @ptrFromInt(@as(usize, child_id)), 0, null, 0);
+    _ = DomOp.appendChild.invoke(.{ .parent_id = parent_id, .child_id = child_id });
 }
 
 fn setAttribute(id: u32, name: []const u8, value: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.setAttribute), id, name.ptr, @intCast(name.len), value.ptr, @intCast(value.len));
+    _ = DomOp.setAttribute.invoke(.{ .id = id, .name = name, .value = value });
 }
 
 fn addEventListener(id: u32, event: []const u8, callback_id: u32) void {
-    _ = dom_op(@intFromEnum(DomOp.addEventListener), id, event.ptr, @intCast(event.len), @ptrFromInt(@as(usize, callback_id)), 0);
+    _ = DomOp.addEventListener.invoke(.{ .id = id, .event = event, .callback_id = callback_id });
 }
 
 fn getValue(id: u32, buffer: []u8) []u8 {
-    const len = dom_op(@intFromEnum(DomOp.getValue), id, null, 0, buffer.ptr, @intCast(buffer.len));
+    const len = DomOp.getValue.invoke(.{ .id = id, .buffer = buffer });
     return buffer[0..len];
 }
 
 fn setInnerHTML(id: u32, html: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.setInnerHTML), id, html.ptr, @intCast(html.len), null, 0);
+    _ = DomOp.setInnerHTML.invoke(.{ .id = id, .html = html });
 }
 
 fn setTextContent(id: u32, text: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.setTextContent), id, text.ptr, @intCast(text.len), null, 0);
+    _ = DomOp.setTextContent.invoke(.{ .id = id, .text = text });
 }
 
 fn setClassName(id: u32, class_name: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.setClassName), id, class_name.ptr, @intCast(class_name.len), null, 0);
+    _ = DomOp.setClassName.invoke(.{ .id = id, .class_name = class_name });
 }
 
 fn setId(id: u32, element_id: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.setId), id, element_id.ptr, @intCast(element_id.len), null, 0);
+    _ = DomOp.setId.invoke(.{ .id = id, .element_id = element_id });
 }
 
 fn setTitle(title: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.setTitle), 0, title.ptr, @intCast(title.len), null, 0);
+    _ = DomOp.setTitle.invoke(.{ .title = title });
 }
 
 fn addStyleSheet(css: []const u8) void {
-    _ = dom_op(@intFromEnum(DomOp.addStyleSheet), 0, css.ptr, @intCast(css.len), null, 0);
+    _ = DomOp.addStyleSheet.invoke(.{ .css = css });
 }
 
 fn reloadWasm() void {
-    _ = dom_op(@intFromEnum(DomOp.reloadWasm), 0, null, 0, null, 0);
+    _ = DomOp.reloadWasm.invoke(.{});
 }
+
+const wasm_op = if (Debug.is_wasm) struct {
+    extern fn wasm_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
+}.wasm_op else (struct {
+    fn f(_: u32, _: u32, _: ?[*]const u8, _: u32, _: ?[*]const u8, _: u32) u32 {
+        return 0;
+    }
+}).f;
+
+pub const WasmOp = enum(u32) {
+    log = 0,
+    warn = 1,
+    err = 2,
+    createThread = 3,
+    threadJoin = 4,
+
+    pub fn invoke(comptime self: WasmOp, args: anytype) u32 {
+        return switch (self) {
+            .log => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
+            .warn => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
+            .err => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
+            .createThread => wasm_op(@intFromEnum(self), args.task_id, null, 0, null, 0),
+            .threadJoin => wasm_op(@intFromEnum(self), args.thread_id, null, 0, null, 0),
+        };
+    }
+};
 
 pub fn createThread(task_id: u32) u32 {
-    return dom_op(@intFromEnum(DomOp.createThread), task_id, null, 0, null, 0);
+    return WasmOp.createThread.invoke(.{ .task_id = task_id });
 }
 
-fn threadJoin(thread_id: u32) void {
-    _ = dom_op(@intFromEnum(DomOp.threadJoin), thread_id, null, 0, null, 0);
+pub fn threadJoin(thread_id: u32) void {
+    _ = WasmOp.threadJoin.invoke(.{ .thread_id = thread_id });
 }
 
 pub const Element = struct {
@@ -212,6 +253,7 @@ fn runTests() void {
     const result2 = -1 + 1;
 
     if (result1 == 5 and result2 == 0) {
+        if (builtin.is_test) return;
         Debug.wasm.success("✅ All tests passed!", .{});
     } else {
         Debug.wasm.err("❌ Tests failed!", .{});

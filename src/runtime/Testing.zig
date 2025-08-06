@@ -26,7 +26,7 @@ pub const ProfiledTest = struct {
     pub fn start(src: SourceLocation) !ProfiledTest {
         const name = src.fn_name[5..];
         var timer = try Time.Timer.start();
-        const start_time = timer.lap();
+        const start_time = timer.read();
 
         return ProfiledTest{
             .name = name,
@@ -38,7 +38,7 @@ pub const ProfiledTest = struct {
     pub fn startWithMemory(src: SourceLocation, fba: *Heap.FixedBufferAllocator) !ProfiledTest {
         const name = src.fn_name[5..];
         var timer = try Time.Timer.start();
-        const start_time = timer.lap();
+        const start_time = timer.read();
         const start_memory = fba.end_index;
 
         return ProfiledTest{

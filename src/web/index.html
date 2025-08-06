@@ -8,51 +8,15 @@
 <body>
 <script>
 async function loadWasm() {
+    const isWorker = typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
     let wasmExports;
-    let elements = [null, document.body];
     let threads = [];
     let wasmModule;
-
+    let elements = isWorker ? [] : [null, document.body];
+    
     const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
-    
-    const threadTask = function() {
-        let wasmInstance;
-        
-        const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len));
-        
-        const log = (fn, msgPtr, msgLen, stylePtr, styleLen) => {
-            const msg = getString(msgPtr, msgLen);
-            const style = getString(stylePtr, styleLen);
-            fn('%c' + msg, style);
-        };
-        
-        onmessage = async function(e) {
-            if (e.data.type === 'init') {
-                const module = e.data.module;
-                
-                // Minimal thread imports
-                const threadImportObject = {
-                    env: {
-                        dom_op: () => 0, // Threads cant do DOM ops
-                        wasm_log: (p,l,s,sl) => log(console.log, p,l,s,sl),
-                        wasm_warn: (p,l,s,sl) => log(console.warn, p,l,s,sl),
-                        wasm_err: (p,l,s,sl) => log(console.error, p,l,s,sl),
-                    }
-                };
-                
-                wasmInstance = await WebAssembly.instantiate(module, threadImportObject);
-            } else if (e.data.type === 'run') {
-                try {
-                    wasmInstance.exports.invoke_thread_task(e.data.task_id);
-                } catch (error) {
-                    console.error('Error calling invoke_thread_task:', error);
-                }
-            }
-        };
-    };
-    
-    // Single DOM operation dispatcher
-    const dom_op = (op, id, ptr1, len1, ptr2, len2) => {
+
+    const dom_op = isWorker ? () => 0 : (op, id, ptr1, len1, ptr2, len2) => {
         const s1 = len1 ? getString(ptr1, len1) : null;
         const s2 = len2 ? getString(ptr2, len2) : null;
         
@@ -117,8 +81,30 @@ async function loadWasm() {
                 loadWasm();
                 return 0;
                 
-            case 12: // createThread
-                const threadCode = `(${threadTask.toString()})()`;
+            default:
+                return 0;
+        }
+    };
+
+    const wasm_op = (op, id, ptr1, len1, ptr2, len2) => {
+        const s1 = len1 ? getString(ptr1, len1) : null;
+        const s2 = len2 ? getString(ptr2, len2) : null;
+        
+        switch(op) {
+            case 0: // log
+                console.log('%c' + s1, s2);
+                return 0;
+                
+            case 1: // warn
+                console.warn('%c' + s1, s2);
+                return 0;
+                
+            case 2: // err
+                console.error('%c' + s1, s2);
+                return 0;
+                
+            case 3: // createThread
+                const threadCode = `(${loadWasm.toString()})()`;
                 const thread = new Worker(URL.createObjectURL(
                     new Blob([threadCode], { type: 'application/javascript' })
                 ));
@@ -130,7 +116,7 @@ async function loadWasm() {
                 threads.push(thread);
                 return threadId;
                 
-            case 13: // threadJoin
+            case 4: // threadJoin
                 if (threads[id]) {
                     threads[id].terminate();
                 }
@@ -140,42 +126,47 @@ async function loadWasm() {
                 return 0;
         }
     };
-    
-    // Console functions
-    const log = (fn, msgPtr, msgLen, stylePtr, styleLen) => {
-        const msg = getString(msgPtr, msgLen);
-        const style = getString(stylePtr, styleLen);
-        fn('%c' + msg, style);
-    };
-    
+
     const importObject = {
         env: {
             dom_op: dom_op,
-            wasm_log: (p,l,s,sl) => log(console.log, p,l,s,sl),
-            wasm_warn: (p,l,s,sl) => log(console.warn, p,l,s,sl),
-            wasm_err: (p,l,s,sl) => log(console.error, p,l,s,sl),
+            wasm_op: wasm_op,
         }
     };
     
-    fetch('./star.wasm')
-    .then(response => response.arrayBuffer())
-    .then(wasmBytes => WebAssembly.compile(wasmBytes))
-    .then(module => {
-        wasmModule = module;
-        return WebAssembly.instantiate(module, importObject);
-    })
-    .then(instance => {
-        wasmExports = instance.exports;
-        elements = [null, document.body];
-        threads = [];
-        
-        if (wasmExports._start) {
-            wasmExports._start();
-        }
-    })
-    .catch(error => {
-        console.log('Error loading WebAssembly:', error);
-    });
+    if (isWorker) {
+        onmessage = async function(e) {
+            if (e.data.type === 'init') {
+                wasmModule = e.data.module;
+                const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
+                wasmExports = wasmInstance.exports;
+            } else if (e.data.type === 'run') {
+                if (wasmExports) {
+                    wasmExports.invoke_thread_task(e.data.task_id);
+                }
+            }
+        };
+    } else {
+        fetch('./star.wasm')
+        .then(response => response.arrayBuffer())
+        .then(wasmBytes => WebAssembly.compile(wasmBytes))
+        .then(module => {
+            wasmModule = module;
+            return WebAssembly.instantiate(module, importObject);
+        })
+        .then(instance => {
+            wasmExports = instance.exports;
+            elements = [null, document.body];
+            threads = [];
+            
+            if (wasmExports._start) {
+                wasmExports._start();
+            }
+        })
+        .catch(error => {
+            console.log('Error loading WebAssembly:', error);
+        });
+    }
 }
 loadWasm();
 </script>

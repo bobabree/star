@@ -221,41 +221,20 @@ const Scope = enum(u8) {
         color: []const u8,
     };
 
-    //var log_entries = FixedBuffer(LogEntry, 20).init(0);
-
     fn wasmPrint(comptime _: Scope, comptime message_level: Level, message: []const u8) void {
-        // Store entry (message is already formatted with scope/level)
-        // if (log_entries.len < log_entries.capacity()) {
-        //     var entry = log_entries.addOne();
-
-        //     entry.message = Utf8Buffer(256).copy(message);
-        //     entry.scope = @tagName(self);
-        //     entry.level = @tagName(message_level);
-        //     entry.color = message_level.asHtmlColor();
-        // }
-
         var console_msg = Utf8Buffer(256).init();
         console_msg.format("{s}", .{message});
 
         var style = Utf8Buffer(256).init();
         style.format("color: {s}; font-family: monospace;", .{message_level.asHtmlColor()});
 
-        switch (message_level) {
-            .err => wasm_err(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
-            .warn => wasm_warn(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
-            else => wasm_log(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
-        }
+        const args = .{ .msg = console_msg.constSlice(), .style = style.constSlice() };
 
-        // var full_html = Utf8Buffer(1024).init();
-        // full_html.format("📁 Output:", .{});
-
-        // for (log_entries.constSlice()) |entry| {
-        //     var log_html = Utf8Buffer(256).init();
-        //     log_html.format("<br><span style='color: {s}; font-family: monospace;'>{s}</span>", .{ entry.color, entry.message.constSlice() });
-        //     full_html.appendSlice(log_html.constSlice());
-        // }
-
-        // _ = Wasm.outputElement.innerHTML(full_html.constSlice());
+        _ = switch (message_level) {
+            .err => Wasm.WasmOp.err.invoke(args),
+            .warn => Wasm.WasmOp.warn.invoke(args),
+            else => Wasm.WasmOp.log.invoke(args),
+        };
     }
 
     fn logFn(
