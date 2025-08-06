@@ -8,196 +8,175 @@
 <body>
 <script>
 async function loadWasm() {
-    const read = (memory, ptr, len) => new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
+    let wasmExports;
+    let elements = [null, document.body];
+    let threads = [];
+    let wasmModule;
 
-    const log = (memory, consoleFunc, msgPtr, msgLen, stylePtr, styleLen) => {
-        const message = read(memory, msgPtr, msgLen);
-        const style = read(memory, stylePtr, styleLen);
-        consoleFunc('%c' + message, style);
-    };
-
-    const makeImports = () => ({
-        console_log: (msgPtr, msgLen, stylePtr, styleLen) => log(wasmExports.memory, console.log, msgPtr, msgLen, stylePtr, styleLen),
-        console_warn: (msgPtr, msgLen, stylePtr, styleLen) => log(wasmExports.memory, console.warn, msgPtr, msgLen, stylePtr, styleLen),
-        console_error: (msgPtr, msgLen, stylePtr, styleLen) => log(wasmExports.memory, console.error, msgPtr, msgLen, stylePtr, styleLen),
-    });
-
-    const importObject = {
-        env: {
-            ...makeImports(),
-            reload_wasm: () => loadWasm(),
-            threadTask: function() {
-                let wasmInstance;
-                onmessage = async function(e) {
-                    if (e.data.type === 'init') {
-                        const module = e.data.module;
-                        const threadId = e.data.threadId; 
-
-                        const read = (memory, ptr, len) => new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
-                        
-                        const log = (memory, consoleFunc, msgPtr, msgLen, stylePtr, styleLen) => {
-                            const message = read(memory, msgPtr, msgLen);
-                            const style = read(memory, stylePtr, styleLen);
-                            consoleFunc('%c' + message, style);
-                        };
-
-                        const makeImports = () => ({
-                            console_log: (msgPtr, msgLen, stylePtr, styleLen) => log(wasmInstance.exports.memory, console.log, msgPtr, msgLen, stylePtr, styleLen),
-                            console_warn: (msgPtr, msgLen, stylePtr, styleLen) => log(wasmInstance.exports.memory, console.warn, msgPtr, msgLen, stylePtr, styleLen),
-                            console_error: (msgPtr, msgLen, stylePtr, styleLen) => log(wasmInstance.exports.memory, console.error, msgPtr, msgLen, stylePtr, styleLen),
-                        });
-                        
-                        // Define all the stubs the thread needs
-                        const threadImportObject = {
-                            env: {
-                                ...makeImports(),
-                                setTitle: function() {},
-                                createElement: function() { return 0; },
-                                appendChild: function() {},
-                                setAttribute: function() {},
-                                addEventListener: function() {},
-                                getValue: function() { return 0; },
-                                setInnerHTML: function() {},
-                                setTextContent: function() {},
-                                setClassName: function() {},
-                                setId: function() {},
-                                addStyleSheet: function() {},
-                                reload_wasm: function() {},
-                                create_thread: function() { return 0; },
-                                thread_join: function() {}
-                            }
-                        };
-                        
-                        wasmInstance = await WebAssembly.instantiate(module, threadImportObject);
-                    } else if (e.data.type === 'run') {
-                        try {
-                            wasmInstance.exports.invoke_thread_task(e.data.task_id);
-                        } catch (error) {
-                            console.error('Error calling invoke_thread_task:', error);
-                        }
+    const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
+    
+    const threadTask = function() {
+        let wasmInstance;
+        
+        const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len));
+        
+        const log = (fn, msgPtr, msgLen, stylePtr, styleLen) => {
+            const msg = getString(msgPtr, msgLen);
+            const style = getString(stylePtr, styleLen);
+            fn('%c' + msg, style);
+        };
+        
+        onmessage = async function(e) {
+            if (e.data.type === 'init') {
+                const module = e.data.module;
+                
+                // Minimal thread imports
+                const threadImportObject = {
+                    env: {
+                        dom_op: () => 0, // Threads cant do DOM ops
+                        wasm_log: (p,l,s,sl) => log(console.log, p,l,s,sl),
+                        wasm_warn: (p,l,s,sl) => log(console.warn, p,l,s,sl),
+                        wasm_err: (p,l,s,sl) => log(console.error, p,l,s,sl),
                     }
                 };
-            },
-            
-            create_thread: (task_id) => {
-                const threadTask = `(${importObject.env.threadTask.toString()})()`;
+                
+                wasmInstance = await WebAssembly.instantiate(module, threadImportObject);
+            } else if (e.data.type === 'run') {
+                try {
+                    wasmInstance.exports.invoke_thread_task(e.data.task_id);
+                } catch (error) {
+                    console.error('Error calling invoke_thread_task:', error);
+                }
+            }
+        };
+    };
+    
+    // Single DOM operation dispatcher
+    const dom_op = (op, id, ptr1, len1, ptr2, len2) => {
+        const s1 = len1 ? getString(ptr1, len1) : null;
+        const s2 = len2 ? getString(ptr2, len2) : null;
+        
+        switch(op) {
+            case 0: // createElement
+                const el = document.createElement(s1);
+                elements.push(el);
+                return elements.length - 1;
+                
+            case 1: // appendChild  
+                if (elements[id] && elements[ptr1])
+                    elements[id].appendChild(elements[ptr1]);
+                return 0;
+                
+            case 2: // setAttribute
+                if (elements[id]) elements[id].setAttribute(s1, s2);
+                return 0;
+                
+            case 3: // addEventListener
+                if (elements[id]) {
+                    elements[id].addEventListener(s1, () => wasmExports.invoke(ptr2));
+                }
+                return 0;
+                
+            case 4: // getValue
+                if (elements[id] && elements[id].value) {
+                    const value = elements[id].value;
+                    const bytes = new TextEncoder().encode(value);
+                    const copyLen = Math.min(bytes.length, len2);
+                    new Uint8Array(wasmExports.memory.buffer).set(bytes.slice(0, copyLen), ptr2);
+                    return copyLen;
+                }
+                return 0;
+                
+            case 5: // setInnerHTML
+                if (elements[id]) elements[id].innerHTML = s1;
+                return 0;
+                
+            case 6: // setTextContent
+                if (elements[id]) elements[id].textContent = s1;
+                return 0;
+                
+            case 7: // setClassName
+                if (elements[id]) elements[id].className = s1;
+                return 0;
+                
+            case 8: // setId
+                if (elements[id]) elements[id].id = s1;
+                return 0;
+                
+            case 9: // setTitle
+                document.title = s1;
+                return 0;
+                
+            case 10: // addStyleSheet
+                const style = document.createElement('style');
+                style.textContent = s1;
+                document.head.appendChild(style);
+                return 0;
+                
+            case 11: // reloadWasm
+                loadWasm();
+                return 0;
+                
+            case 12: // createThread
+                const threadCode = `(${threadTask.toString()})()`;
                 const thread = new Worker(URL.createObjectURL(
-                    new Blob([threadTask], { type: 'application/javascript' })
+                    new Blob([threadCode], { type: 'application/javascript' })
                 ));
                 const threadId = threads.length;
                 
                 thread.postMessage({ type: 'init', module: wasmModule, threadId: threadId });
-                thread.postMessage({ type: 'run', task_id: task_id });
+                thread.postMessage({ type: 'run', task_id: id });
                 
                 threads.push(thread);
                 return threadId;
-            },
-
-            thread_join: (thread_id) => {
-                if (threads[thread_id]) {
-                    threads[thread_id].terminate();
-                }
-            },
-            
-            createElement: (tag_ptr, tag_len) => {
-                const tag = read(wasmExports.memory, tag_ptr, tag_len);
-                const el = document.createElement(tag);
-                elements.push(el);
-                return elements.length - 1;
-            },
-            
-            appendChild: (parent_id, child_id) => {
-                if (elements[parent_id] && elements[child_id]) {
-                    elements[parent_id].appendChild(elements[child_id]);
-                }
-            },
-            
-            setAttribute: (id, name_ptr, name_len, value_ptr, value_len) => {
-                const name = read(wasmExports.memory, name_ptr, name_len);
-                const value = read(wasmExports.memory, value_ptr, value_len);
-                if (elements[id]) elements[id].setAttribute(name, value);
-            },
-            
-            addEventListener: (id, event_ptr, event_len, callback_id) => {
-                const event = read(wasmExports.memory, event_ptr, event_len);
-                if (elements[id]) {
-                    elements[id].addEventListener(event, () => wasmExports.invoke(callback_id));
-                }
-            },
-            
-            getValue: (id, buffer_ptr, buffer_len) => {
-                if (elements[id] && elements[id].value) {
-                    const value = elements[id].value;
-                    const bytes = new TextEncoder().encode(value);
-                    const copyLen = Math.min(bytes.length, buffer_len);
-                    new Uint8Array(wasmExports.memory.buffer).set(bytes.slice(0, copyLen), buffer_ptr);
-                    return copyLen;
+                
+            case 13: // threadJoin
+                if (threads[id]) {
+                    threads[id].terminate();
                 }
                 return 0;
-            },
-            
-            setInnerHTML: (id, html_ptr, html_len) => {
-                const html = read(wasmExports.memory, html_ptr, html_len);
-                if (elements[id]) elements[id].innerHTML = html;
-            },
-            
-            setTextContent: (id, text_ptr, text_len) => {
-                const text = read(wasmExports.memory, text_ptr, text_len);
-                if (elements[id]) elements[id].textContent = text;
-            },
-            
-            setClassName: (id, class_ptr, class_len) => {
-                const className = read(wasmExports.memory, class_ptr, class_len);
-                if (elements[id]) elements[id].className = className;
-            },
-            
-            setId: (id, id_ptr, id_len) => {
-                const elementId = read(wasmExports.memory, id_ptr, id_len);
-                if (elements[id]) elements[id].id = elementId;
-            },
-            
-            setTitle: (title_ptr, title_len) => {
-                document.title = read(wasmExports.memory, title_ptr, title_len);
-            },
-            
-            addStyleSheet: (css_ptr, css_len) => {
-                const css = read(wasmExports.memory, css_ptr, css_len);
-                const style = document.createElement('style');
-                style.textContent = css;
-                document.head.appendChild(style);
-            }
+                
+            default:
+                return 0;
         }
     };
-
-    const compileOptions = {
-        builtins: ["js-string", "text-encoder"]
+    
+    // Console functions
+    const log = (fn, msgPtr, msgLen, stylePtr, styleLen) => {
+        const msg = getString(msgPtr, msgLen);
+        const style = getString(stylePtr, styleLen);
+        fn('%c' + msg, style);
     };
-
+    
+    const importObject = {
+        env: {
+            dom_op: dom_op,
+            wasm_log: (p,l,s,sl) => log(console.log, p,l,s,sl),
+            wasm_warn: (p,l,s,sl) => log(console.warn, p,l,s,sl),
+            wasm_err: (p,l,s,sl) => log(console.error, p,l,s,sl),
+        }
+    };
+    
     fetch('./star.wasm')
     .then(response => response.arrayBuffer())
-    .then(wasmBytes => WebAssembly.compile(wasmBytes, compileOptions))
-    .then(wasmModule => {
-        window.wasmModule = wasmModule; 
-        return WebAssembly.instantiate(wasmModule, importObject);
+    .then(wasmBytes => WebAssembly.compile(wasmBytes))
+    .then(module => {
+        wasmModule = module;
+        return WebAssembly.instantiate(module, importObject);
     })
-    .then(wasmInstance => {
-        console.log('Loading WebAssembly module...');
-
-        window.wasmExports = {
-            ...wasmInstance.exports,
-        };
-        window.elements = [null, document.body];
-        window.threads = [];
-
+    .then(instance => {
+        wasmExports = instance.exports;
+        elements = [null, document.body];
+        threads = [];
+        
         if (wasmExports._start) {
-            wasmExports._start(); 
+            wasmExports._start();
         }
     })
     .catch(error => {
-        console.log('Error loading WebAssembly: ', error);
+        console.log('Error loading WebAssembly:', error);
     });
 }
-
 loadWasm();
 </script>
 </body>

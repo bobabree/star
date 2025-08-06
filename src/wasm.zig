@@ -6,7 +6,7 @@ const FixedBufferAllocator = runtime.Heap.FixedBufferAllocator;
 const Mem = runtime.Mem;
 const Thread = runtime.Thread;
 const Utf8Buffer = runtime.Utf8Buffer.Utf8Buffer;
-const UI = runtime.UI;
+const Wasm = runtime.Wasm;
 
 var buffer: [1024]u8 = undefined;
 var fba: FixedBufferAllocator = undefined;
@@ -17,7 +17,7 @@ export fn _start() void {
     allocator = fba.allocator();
 
     // Build the UI
-    UI.buildUI();
+    Wasm.buildUI();
 
     const greeting = "UI built successfully!";
     Debug.wasm.debug(greeting, .{});
@@ -29,8 +29,6 @@ export fn _start() void {
         startHotReload();
     }
 }
-
-extern fn reload_wasm() void;
 
 var last_wasm_size: u32 = 0;
 var hmr_enabled: bool = false;

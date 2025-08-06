@@ -3,117 +3,131 @@ const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 // Extern functions for WASM, stubs for testing
-const createElement = if (Debug.is_wasm) struct {
-    extern fn createElement(tag_ptr: [*]const u8, tag_len: usize) u32;
-}.createElement else (struct {
-    fn f(_: [*]const u8, _: usize) u32 {
-        return 0;
-    }
-}).f;
+// const appendChild = if (Debug.is_wasm) struct {
+//     extern fn appendChild(parent: u32, child: u32) void;
+// }.appendChild else (struct {
+//     fn f(_: u32, _: u32) void {}
+// }).f;
 
-const appendChild = if (Debug.is_wasm) struct {
-    extern fn appendChild(parent: u32, child: u32) void;
-}.appendChild else (struct {
-    fn f(_: u32, _: u32) void {}
-}).f;
+extern fn dom_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
 
-const setAttribute = if (Debug.is_wasm) struct {
-    extern fn setAttribute(id: u32, name_ptr: [*]const u8, name_len: usize, value_ptr: [*]const u8, value_len: usize) void;
-}.setAttribute else (struct {
-    fn f(_: u32, _: [*]const u8, _: usize, _: [*]const u8, _: usize) void {}
-}).f;
+// DOM Operation enum
+const DomOp = enum(u32) {
+    createElement = 0,
+    appendChild = 1,
+    setAttribute = 2,
+    addEventListener = 3,
+    getValue = 4,
+    setInnerHTML = 5,
+    setTextContent = 6,
+    setClassName = 7,
+    setId = 8,
+    setTitle = 9,
+    addStyleSheet = 10,
+    reloadWasm = 11,
+    createThread = 12,
+    threadJoin = 13,
+};
 
-const addEventListener = if (Debug.is_wasm) struct {
-    extern fn addEventListener(id: u32, event_ptr: [*]const u8, event_len: usize, callback_id: u32) void;
-}.addEventListener else (struct {
-    fn f(_: u32, _: [*]const u8, _: usize, _: u32) void {}
-}).f;
+fn createElement(tag: []const u8) u32 {
+    return dom_op(@intFromEnum(DomOp.createElement), 0, tag.ptr, @intCast(tag.len), null, 0);
+}
 
-const getValue = if (Debug.is_wasm) struct {
-    extern fn getValue(id: u32, buffer_ptr: [*]u8, buffer_len: usize) usize;
-}.getValue else (struct {
-    fn f(_: u32, _: [*]u8, _: usize) usize {
-        return 0;
-    }
-}).f;
+fn appendChild(parent_id: u32, child_id: u32) void {
+    // Pass child_id as the first pointer parameter (hacky but works)
+    _ = dom_op(@intFromEnum(DomOp.appendChild), parent_id, @ptrFromInt(@as(usize, child_id)), 0, null, 0);
+}
 
-const setTitle = if (Debug.is_wasm) struct {
-    extern fn setTitle(title_ptr: [*]const u8, title_len: usize) void;
-}.setTitle else (struct {
-    fn f(_: [*]const u8, _: usize) void {}
-}).f;
+fn setAttribute(id: u32, name: []const u8, value: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.setAttribute), id, name.ptr, @intCast(name.len), value.ptr, @intCast(value.len));
+}
 
-const addStyleSheet = if (Debug.is_wasm) struct {
-    extern fn addStyleSheet(css_ptr: [*]const u8, css_len: usize) void;
-}.addStyleSheet else (struct {
-    fn f(_: [*]const u8, _: usize) void {}
-}).f;
+fn addEventListener(id: u32, event: []const u8, callback_id: u32) void {
+    _ = dom_op(@intFromEnum(DomOp.addEventListener), id, event.ptr, @intCast(event.len), @ptrFromInt(@as(usize, callback_id)), 0);
+}
 
-const setInnerHTML = if (Debug.is_wasm) struct {
-    extern fn setInnerHTML(id: u32, html_ptr: [*]const u8, html_len: usize) void;
-}.setInnerHTML else (struct {
-    fn f(_: u32, _: [*]const u8, _: usize) void {}
-}).f;
+fn getValue(id: u32, buffer: []u8) []u8 {
+    const len = dom_op(@intFromEnum(DomOp.getValue), id, null, 0, buffer.ptr, @intCast(buffer.len));
+    return buffer[0..len];
+}
 
-const setTextContent = if (Debug.is_wasm) struct {
-    extern fn setTextContent(id: u32, text_ptr: [*]const u8, text_len: usize) void;
-}.setTextContent else (struct {
-    fn f(_: u32, _: [*]const u8, _: usize) void {}
-}).f;
+fn setInnerHTML(id: u32, html: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.setInnerHTML), id, html.ptr, @intCast(html.len), null, 0);
+}
 
-const setClassName = if (Debug.is_wasm) struct {
-    extern fn setClassName(id: u32, class_ptr: [*]const u8, class_len: usize) void;
-}.setClassName else (struct {
-    fn f(_: u32, _: [*]const u8, _: usize) void {}
-}).f;
+fn setTextContent(id: u32, text: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.setTextContent), id, text.ptr, @intCast(text.len), null, 0);
+}
 
-const setId = if (Debug.is_wasm) struct {
-    extern fn setId(id: u32, id_ptr: [*]const u8, id_len: usize) void;
-}.setId else (struct {
-    fn f(_: u32, _: [*]const u8, _: usize) void {}
-}).f;
+fn setClassName(id: u32, class_name: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.setClassName), id, class_name.ptr, @intCast(class_name.len), null, 0);
+}
+
+fn setId(id: u32, element_id: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.setId), id, element_id.ptr, @intCast(element_id.len), null, 0);
+}
+
+fn setTitle(title: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.setTitle), 0, title.ptr, @intCast(title.len), null, 0);
+}
+
+fn addStyleSheet(css: []const u8) void {
+    _ = dom_op(@intFromEnum(DomOp.addStyleSheet), 0, css.ptr, @intCast(css.len), null, 0);
+}
+
+fn reloadWasm() void {
+    _ = dom_op(@intFromEnum(DomOp.reloadWasm), 0, null, 0, null, 0);
+}
+
+pub fn createThread(task_id: u32) u32 {
+    return dom_op(@intFromEnum(DomOp.createThread), task_id, null, 0, null, 0);
+}
+
+fn threadJoin(thread_id: u32) void {
+    _ = dom_op(@intFromEnum(DomOp.threadJoin), thread_id, null, 0, null, 0);
+}
 
 pub const Element = struct {
     id: u32,
 
     pub fn innerHTML(self: Element, content: []const u8) Element {
-        setInnerHTML(self.id, content.ptr, content.len);
+        setInnerHTML(self.id, content);
         return self;
     }
 
     pub fn textContent(self: Element, content: []const u8) Element {
-        setTextContent(self.id, content.ptr, content.len);
+        setTextContent(self.id, content);
         return self;
     }
 
     pub fn elementId(self: Element, element_id: []const u8) Element {
-        setId(self.id, element_id.ptr, element_id.len);
+        setId(self.id, element_id);
         return self;
     }
 
     pub fn className(self: Element, class_name: []const u8) Element {
-        setClassName(self.id, class_name.ptr, class_name.len);
+        setClassName(self.id, class_name);
         return self;
     }
 
     pub fn placeholder(self: Element, text: []const u8) Element {
-        setAttribute(self.id, "placeholder".ptr, 11, text.ptr, text.len);
+        setAttribute(self.id, "placeholder", text);
         return self;
     }
 
     pub fn value(self: Element, val: []const u8) Element {
-        setAttribute(self.id, "value".ptr, 5, val.ptr, val.len);
+        setAttribute(self.id, "value", val);
         return self;
     }
 
     pub fn inputType(self: Element, input_type: []const u8) Element {
-        setAttribute(self.id, "type".ptr, 4, input_type.ptr, input_type.len);
+        setAttribute(self.id, "type", input_type);
         return self;
     }
 
     pub fn onclick(self: Element, handler: fn () void) Element {
         const callback_id = Events.register(handler);
-        addEventListener(self.id, "click".ptr, 5, callback_id);
+        addEventListener(self.id, "click", callback_id);
         return self;
     }
 
@@ -130,36 +144,35 @@ pub const Element = struct {
     }
 
     pub fn getInputValue(self: Element, buffer: []u8) []u8 {
-        const len = getValue(self.id, buffer.ptr, buffer.len);
-        return buffer[0..len];
+        return getValue(self.id, buffer);
     }
 };
 
 // Element constructors
 pub fn div() Element {
-    return Element{ .id = createElement("div".ptr, 3) };
+    return Element{ .id = createElement("div") };
 }
 pub fn h1() Element {
-    return Element{ .id = createElement("h1".ptr, 2) };
+    return Element{ .id = createElement("h1") };
 }
 pub fn p() Element {
-    return Element{ .id = createElement("p".ptr, 1) };
+    return Element{ .id = createElement("p") };
 }
 pub fn button() Element {
-    return Element{ .id = createElement("button".ptr, 6) };
+    return Element{ .id = createElement("button") };
 }
 pub fn input() Element {
-    return Element{ .id = createElement("input".ptr, 5) };
+    return Element{ .id = createElement("input") };
 }
 
 // Document API
 pub const document = struct {
     pub fn title(page_title: []const u8) void {
-        setTitle(page_title.ptr, page_title.len);
+        setTitle(page_title);
     }
 
     pub fn addCSS(css: []const u8) void {
-        addStyleSheet(css.ptr, css.len);
+        addStyleSheet(css);
     }
 
     pub fn body() Element {
@@ -186,7 +199,7 @@ const Events = struct {
 };
 
 // UI elements for later reference
-pub var outputElement: Element = undefined; //TODO: lock?
+pub var outputElement: Element = undefined;
 var installUrlElement: Element = undefined;
 var num1Element: Element = undefined;
 var num2Element: Element = undefined;

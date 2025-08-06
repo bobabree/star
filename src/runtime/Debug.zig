@@ -4,7 +4,7 @@ const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const IO = @import("IO.zig");
 const Mem = @import("Mem.zig");
 const Thread = @import("Thread.zig");
-const UI = @import("UI.zig");
+const Wasm = @import("Wasm.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 const dumpCurrentStackTrace = @import("std").debug.dumpCurrentStackTrace;
@@ -88,9 +88,6 @@ pub fn panicAssert(condition: bool, comptime format: []const u8, args: anytype) 
         inline else => |scope| scope.panicAssert(condition, format, args, @returnAddress()),
     }
 }
-
-// Externs for WASM
-extern fn wasm_print(ptr: [*]const u8, len: usize, scope: [*:0]const u8, level_handle: [*:0]const u8) void;
 
 const Scope = enum(u8) {
     js = 0,
@@ -244,9 +241,9 @@ const Scope = enum(u8) {
         style.format("color: {s}; font-family: monospace;", .{message_level.asHtmlColor()});
 
         switch (message_level) {
-            .err => console_error(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
-            .warn => console_warn(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
-            else => console_log(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
+            .err => wasm_err(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
+            .warn => wasm_warn(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
+            else => wasm_log(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
         }
 
         // var full_html = Utf8Buffer(1024).init();
@@ -258,7 +255,7 @@ const Scope = enum(u8) {
         //     full_html.appendSlice(log_html.constSlice());
         // }
 
-        // _ = UI.outputElement.innerHTML(full_html.constSlice());
+        // _ = Wasm.outputElement.innerHTML(full_html.constSlice());
     }
 
     fn logFn(
@@ -326,9 +323,9 @@ const Level = enum(u8) {
     }
 };
 
-extern fn console_log(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
-extern fn console_warn(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
-extern fn console_error(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
+extern fn wasm_log(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
+extern fn wasm_warn(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
+extern fn wasm_err(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
 
 comptime {
     assert(@intFromEnum(Level.err) == 0);

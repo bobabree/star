@@ -1,10 +1,10 @@
 const thread = @import("std").Thread;
-const m = @import("std");
 const Debug = @import("Debug.zig");
 
 const Thread = if (Debug.is_wasm) WasmThread else thread;
 const SpawnConfig = thread.SpawnConfig;
 const SpawnError = thread.SpawnError;
+const Wasm = @import("Wasm.zig");
 
 pub fn spawn(config: SpawnConfig, comptime function: anytype, args: anytype) SpawnError!Thread {
     if (Debug.is_wasm) {
@@ -18,7 +18,7 @@ const WasmThread = struct {
     thread_id: u32,
 
     pub fn join(self: WasmThread) void {
-        thread_join(self.thread_id);
+        Wasm.threadJoin(self.thread_id);
     }
 
     pub fn detach(self: WasmThread) void {
@@ -27,16 +27,13 @@ const WasmThread = struct {
     }
 };
 
-extern fn create_thread(task_id: u32) u32;
-extern fn thread_join(thread_id: u32) void;
-
 fn wasmSpawn(config: SpawnConfig, comptime _: anytype, args: anytype) SpawnError!WasmThread {
     _ = config;
     _ = args;
 
     // TODO: For now, just use hot_reload as default task
     const task_id = @intFromEnum(TaskType.hot_reload);
-    const thread_id = create_thread(task_id);
+    const thread_id = Wasm.createThread(task_id);
     return WasmThread{ .thread_id = thread_id };
 }
 
@@ -119,7 +116,7 @@ fn checkWasmSize() !void {
 
     //     if (last_wasm_size != 0 and size != last_wasm_size) {
     //         runtime.Debug.wasm.info("🔄 WASM file changed, reloading...", .{});
-    //         reload_wasm();
+    //         reloadWasm();
     //     }
     //     last_wasm_size = size;
     // } else {
