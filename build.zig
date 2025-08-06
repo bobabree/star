@@ -5,6 +5,31 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const result = std.process.Child.run(.{
+        .allocator = b.allocator,
+        .argv = &[_][]const u8{
+            "html-minifier-terser",
+            "src/web/index.html",
+            "--collapse-whitespace",
+            "--remove-comments",
+            "--minify-js",
+            "--minify-css",
+            "--remove-attribute-quotes",
+            "--remove-redundant-attributes",
+            "--remove-script-type-attributes",
+            "--remove-style-link-type-attributes",
+            "--use-short-doctype",
+            "-o",
+            "src/web/index.min.html",
+        },
+    }) catch {
+        std.log.warn("HTML minification failed, using unminified version\n", .{});
+        std.fs.cwd().copyFile("src/web/index.html", std.fs.cwd(), "src/web/index.min.html", .{}) catch {};
+        return;
+    };
+    defer b.allocator.free(result.stdout);
+    defer b.allocator.free(result.stderr);
+
     // Platform definitions
     const platforms = [_]struct {
         target: std.Target.Query,
@@ -181,8 +206,8 @@ fn createPlatformArtifacts(
     wasm.import_table = false;
     wasm.export_table = false;
     wasm.shared_memory = false;
-    wasm.initial_memory = 65536 * 2;
-    wasm.max_memory = 65536 * 2;
+    wasm.initial_memory = 65536 * 1;
+    wasm.max_memory = 65536 * 1;
     wasm.global_base = 1024;
 
     // Stack size
@@ -213,14 +238,20 @@ fn createPlatformArtifacts(
     const exe_install = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
     const wasm_install = b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = folder_name } } });
 
+    // Install wasm-opt for automatic optimization:
+    //  macOS:   brew install binaryen
+    //  Linux:   sudo apt install binaryen
+    //  Windows: github.com/WebAssembly/binaryen/releases
     const optimize_wasm = b.addSystemCommand(&.{
         "wasm-opt",
         b.getInstallPath(.{ .custom = folder_name }, "star.wasm"),
         "-Oz",
         "--converge",
+        "--dce",
         "-o",
         b.getInstallPath(.{ .custom = folder_name }, "star.wasm"),
     });
+
     optimize_wasm.step.dependOn(&wasm_install.step);
     optimize_wasm.failing_to_execute_foreign_is_an_error = false;
 

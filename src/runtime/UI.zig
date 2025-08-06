@@ -231,14 +231,7 @@ fn calculate() void {
 pub fn buildUI() void {
     document.title("Zig WebAssembly Demo");
 
-    document.addCSS(
-        \\body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-        \\.container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        \\button { background: #007acc; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        \\button:hover { background: #005a99; }
-        \\#output { background: #f8f8f8; border: 1px solid #ddd; padding: 15px; margin-top: 20px; border-radius: 5px; font-family: monospace; min-height: 100px; }
-        \\input { padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 3px; font-size: 16px; }
-    );
+    document.addCSS("body{font-family:monospace}button{background:#007acc}");
 
     // Store elements for later use
     outputElement = div().elementId("output").innerHTML("📁 Output:");

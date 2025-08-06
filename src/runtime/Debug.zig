@@ -34,11 +34,11 @@ const ScopeLevel = struct {
 };
 
 const scope_levels: []const ScopeLevel = &.{
-    .{ .scope = Scope.js, .level = Level.debug },
-    .{ .scope = Scope.wasm, .level = Level.debug },
+    .{ .scope = Scope.js, .level = level },
+    .{ .scope = Scope.wasm, .level = level },
     .{ .scope = Scope.server, .level = Level.debug },
-    .{ .scope = Scope.ios, .level = Level.debug },
-    .{ .scope = Scope.default, .level = Level.debug },
+    .{ .scope = Scope.ios, .level = level },
+    .{ .scope = Scope.default, .level = level },
 };
 
 // Thread-local scope management
@@ -211,18 +211,18 @@ const Scope = enum(u8) {
         color: []const u8,
     };
 
-    var log_entries = FixedBuffer(LogEntry, 20).init(0);
+    //var log_entries = FixedBuffer(LogEntry, 20).init(0);
 
-    fn wasmPrint(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
+    fn wasmPrint(comptime _: Scope, comptime message_level: Level, message: []const u8) void {
         // Store entry (message is already formatted with scope/level)
-        if (log_entries.len < log_entries.capacity()) {
-            var entry = log_entries.addOne();
+        // if (log_entries.len < log_entries.capacity()) {
+        //     var entry = log_entries.addOne();
 
-            entry.message = Utf8Buffer(256).copy(message);
-            entry.scope = @tagName(self);
-            entry.level = @tagName(message_level);
-            entry.color = message_level.asHtmlColor();
-        }
+        //     entry.message = Utf8Buffer(256).copy(message);
+        //     entry.scope = @tagName(self);
+        //     entry.level = @tagName(message_level);
+        //     entry.color = message_level.asHtmlColor();
+        // }
 
         var console_msg = Utf8Buffer(256).init();
         console_msg.format("{s}", .{message});
@@ -236,8 +236,8 @@ const Scope = enum(u8) {
             else => console_log(console_msg.constSlice().ptr, console_msg.constSlice().len, style.constSlice().ptr, style.constSlice().len),
         }
 
-        var full_html = Utf8Buffer(1024).init();
-        full_html.format("📁 Output:", .{});
+        // var full_html = Utf8Buffer(1024).init();
+        // full_html.format("📁 Output:", .{});
 
         // for (log_entries.constSlice()) |entry| {
         //     var log_html = Utf8Buffer(256).init();
@@ -245,7 +245,7 @@ const Scope = enum(u8) {
         //     full_html.appendSlice(log_html.constSlice());
         // }
 
-        _ = UI.outputElement.innerHTML(full_html.constSlice());
+        // _ = UI.outputElement.innerHTML(full_html.constSlice());
     }
 
     fn logFn(

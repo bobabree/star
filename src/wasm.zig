@@ -19,9 +19,15 @@ export fn _start() void {
     // Build the UI
     UI.buildUI();
 
-    Debug.wasm.success("UI built successfully!", .{});
+    const greeting = "UI built successfully!";
+    Debug.wasm.debug(greeting, .{});
+    Debug.wasm.info(greeting, .{});
+    Debug.wasm.warn(greeting, .{});
+    Debug.wasm.success(greeting, .{});
 
-    startHotReload(); //TODO: dev only
+    if (runtime.builtin.mode == .Debug) {
+        startHotReload();
+    }
 }
 
 extern fn reload_wasm() void;

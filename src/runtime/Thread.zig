@@ -58,9 +58,7 @@ pub const sleep = thread.sleep;
 
 pub const TaskType = enum(u32) {
     hot_reload = 0,
-    background_sync = 1,
-    network_task = 2,
-    default = 3,
+    default = 1,
 
     pub fn getTaskId(comptime self: TaskType) u32 {
         return @intFromEnum(self);
@@ -69,8 +67,6 @@ pub const TaskType = enum(u32) {
     pub fn execute(comptime self: TaskType) void {
         switch (self) {
             .hot_reload, .default => self.hotReloadLoop(),
-            .background_sync => self.backgroundSyncLoop(),
-            .network_task => self.networkTaskLoop(),
         }
     }
 
@@ -83,16 +79,6 @@ pub const TaskType = enum(u32) {
                 continue;
             };
         }
-    }
-
-    fn backgroundSyncLoop(comptime self: TaskType) void {
-        _ = self;
-        Debug.wasm.warn("Background sync running", .{});
-    }
-
-    fn networkTaskLoop(comptime self: TaskType) void {
-        _ = self;
-        Debug.wasm.warn("Network task running", .{});
     }
 };
 
