@@ -273,7 +273,7 @@ fn createModuleOptions(
     return .{
         .root_source_file = root_source_file,
         .target = target,
-        .optimize = if (minimal) .ReleaseSmall else optimize,
+        .optimize = optimize,
         .link_libc = if (minimal) false else null,
         .link_libcpp = false,
         .single_threaded = false,

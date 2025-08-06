@@ -59,12 +59,25 @@ pub fn getCurrentScope() Scope {
 }
 
 pub fn assert(condition: bool) void {
-    switch (getCurrentScope()) {
-        inline else => |s| s.assert(condition, @returnAddress()),
+    if (comptime builtin.mode == .ReleaseSmall) {
+        if (!condition) unreachable; // Just trap, no message
+    } else {
+        switch (getCurrentScope()) {
+            inline else => |s| s.assert(condition, @returnAddress()),
+        }
     }
 }
 
-pub fn panic(comptime format: []const u8, args: anytype) noreturn {
+pub const panic = if (builtin.mode == .ReleaseSmall)
+    panicMinimal
+else
+    panicFull;
+
+fn panicMinimal(_: []const u8, _: anytype) noreturn {
+    @trap();
+}
+
+pub fn panicFull(comptime format: []const u8, args: anytype) noreturn {
     switch (getCurrentScope()) {
         inline else => |scope| scope.panic(format, args, @returnAddress()),
     }
