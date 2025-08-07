@@ -307,7 +307,7 @@ pub fn buildUI() void {
 
     // Store elements for later use
     outputElement = div().elementId("output").innerHTML("📁 Output:");
-    installUrlElement = input().elementId("install-url").inputType("text").placeholder("Package URL").value("https://example.com/package.tar");
+    installUrlElement = input().elementId("install-url").inputType("text").placeholder("Package URL").value("https://github.com/nlohmann/json");
     num1Element = input().elementId("num1").inputType("number").placeholder("First number").value("5");
     num2Element = input().elementId("num2").inputType("number").placeholder("Second number").value("3");
 
@@ -316,8 +316,8 @@ pub fn buildUI() void {
 
     // Build UI structure
     _ = document.body().add(div().className("container").children(&.{
-        h1().textContent("Zig WebAssembly Demo"),
-        p().textContent("This demonstrates Zig code running in the browser via WebAssembly."),
+        h1().textContent("WebAssembly Demo"),
+        //p().textContent("This demonstrates Zig code running in the browser via WebAssembly."),
 
         div().children(&.{
             button().textContent("Run Tests").onclick(runTests),

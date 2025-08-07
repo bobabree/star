@@ -287,7 +287,14 @@ fn createPlatformArtifacts(
 
             const embed = EmbedStep.create(b, b.getInstallPath(.{ .custom = folder_name }, "star.wasm"), b.getInstallPath(.{ .custom = folder_name }, ""));
             embed.step.dependOn(&wasm_install.step);
-            step.dependOn(&embed.step);
+            const copy_to_docs = b.addSystemCommand(&.{
+                "cp",
+                b.getInstallPath(.{ .custom = folder_name }, "index.html"),
+                "docs/index.html",
+            });
+            copy_to_docs.step.dependOn(&embed.step);
+
+            step.dependOn(&copy_to_docs.step);
         }
     }
 }
