@@ -108,6 +108,8 @@ pub const WasmOp = enum(u32) {
     err = 2,
     createThread = 3,
     threadJoin = 4,
+    terminalInit = 5,
+    terminalWrite = 6,
 
     pub fn invoke(comptime self: WasmOp, args: anytype) u32 {
         return switch (self) {
@@ -116,6 +118,8 @@ pub const WasmOp = enum(u32) {
             .err => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
             .createThread => wasm_op(@intFromEnum(self), args.task_id, null, 0, null, 0),
             .threadJoin => wasm_op(@intFromEnum(self), args.thread_id, null, 0, null, 0),
+            .terminalInit => wasm_op(@intFromEnum(self), 0, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
+            .terminalWrite => wasm_op(@intFromEnum(self), 0, args.text.ptr, @intCast(args.text.len), null, 0),
         };
     }
 };
@@ -126,6 +130,14 @@ pub fn createThread(task_id: u32) u32 {
 
 pub fn threadJoin(thread_id: u32) void {
     _ = WasmOp.threadJoin.invoke(.{ .thread_id = thread_id });
+}
+
+pub fn terminalInit(element_id: []const u8) void {
+    _ = WasmOp.terminalInit.invoke(.{ .element_id = element_id });
+}
+
+pub fn terminalWrite(text: []const u8) void {
+    _ = WasmOp.terminalWrite.invoke(.{ .text = text });
 }
 
 pub const Element = struct {
@@ -244,6 +256,7 @@ pub var outputElement: Element = undefined;
 var installUrlElement: Element = undefined;
 var num1Element: Element = undefined;
 var num2Element: Element = undefined;
+pub var terminalElement: Element = undefined;
 
 // Event handlers
 fn runTests() void {
@@ -280,6 +293,10 @@ fn calculate() void {
     const result = num1 + num2;
 
     Debug.wasm.info("Calculated: {d} + {d} = {d}", .{ num1, num2, result });
+
+    var buffer: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buffer, "Calculated: {d} + {d} = {d}\r\n$ ", .{ num1, num2, result }) catch return;
+    terminalWrite(msg);
 }
 
 // Build the UI
@@ -293,6 +310,9 @@ pub fn buildUI() void {
     installUrlElement = input().elementId("install-url").inputType("text").placeholder("Package URL").value("https://example.com/package.tar");
     num1Element = input().elementId("num1").inputType("number").placeholder("First number").value("5");
     num2Element = input().elementId("num2").inputType("number").placeholder("Second number").value("3");
+
+    // Store terminal element
+    terminalElement = div().elementId("terminal");
 
     // Build UI structure
     _ = document.body().add(div().className("container").children(&.{
@@ -312,7 +332,12 @@ pub fn buildUI() void {
         }),
 
         outputElement,
+        terminalElement,
     }));
+
+    terminalInit("terminal");
+    terminalWrite("⭐️ Star Terminal Ready!\r\n");
+    terminalWrite("Type commands here...\r\n$ ");
 }
 
 const Testing = @import("Testing.zig");
