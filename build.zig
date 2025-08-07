@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
         .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .macos }, .folder_name = "star-mac" },
         .{ .target = .{ .cpu_arch = .x86_64, .os_tag = .windows }, .folder_name = "star-win" },
         .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .windows }, .folder_name = "star-win-arm64" },
-        .{ .target = .{ .cpu_arch = .wasm32, .os_tag = .freestanding }, .folder_name = "star-wasm" },
+        .{ .target = .{ .cpu_arch = .wasm32, .os_tag = .freestanding }, .folder_name = "star-web" },
 
         // iOS targets
         .{ .target = .{ .cpu_arch = .aarch64, .os_tag = .ios }, .folder_name = "star-ios" },
@@ -79,7 +79,6 @@ pub fn build(b: *std.Build) void {
     // # Build system testing
     // zig build test --summary all      # Run all tests before committing
     // zig build test --summary failures # Only show failures
-    // zig build test -j1                # Single-threaded testing
 
     // # Direct file testing
     // zig test runtime/server.zig       # Test specific file before commit (broken for some reason)
@@ -258,6 +257,38 @@ fn createPlatformArtifacts(
     if (install_step) |step| {
         step.dependOn(&exe_install.step);
         step.dependOn(&optimize_wasm.step);
+
+        if (platform.target.cpu_arch == .wasm32 or optimize == .Debug) {
+            const EmbedStep = struct {
+                step: std.Build.Step,
+                wasm_path: []const u8,
+                output_dir: []const u8,
+
+                pub fn create(builder: *std.Build, wasm_path: []const u8, output_dir: []const u8) *@This() {
+                    const self = builder.allocator.create(@This()) catch @panic("OOM");
+                    self.* = .{
+                        .step = std.Build.Step.init(.{
+                            .id = .custom,
+                            .name = "embed-wasm",
+                            .owner = builder,
+                            .makeFn = make,
+                        }),
+                        .wasm_path = builder.dupe(wasm_path),
+                        .output_dir = builder.dupe(output_dir),
+                    };
+                    return self;
+                }
+
+                fn make(s: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
+                    const self: *@This() = @fieldParentPtr("step", s);
+                    embedWasmInHtml(s.owner, self.wasm_path, self.output_dir);
+                }
+            };
+
+            const embed = EmbedStep.create(b, b.getInstallPath(.{ .custom = folder_name }, "star.wasm"), b.getInstallPath(.{ .custom = folder_name }, ""));
+            embed.step.dependOn(&wasm_install.step);
+            step.dependOn(&embed.step);
+        }
     }
 }
 
@@ -293,4 +324,57 @@ fn createModuleOptions(
         .error_tracing = !minimal,
         .no_builtin = false,
     };
+}
+
+fn embedWasmInHtml(b: *std.Build, wasm_path: []const u8, output_dir: []const u8) void {
+    const wasm_data = std.fs.cwd().readFileAlloc(b.allocator, wasm_path, 10_000_000) catch |err| {
+        std.log.err("Failed to read WASM file: {}", .{err});
+        return;
+    };
+    defer b.allocator.free(wasm_data);
+
+    const encoder = std.base64.standard.Encoder;
+    const encoded_len = encoder.calcSize(wasm_data.len);
+    const encoded = b.allocator.alloc(u8, encoded_len) catch |err| {
+        std.log.err("Failed to allocate for base64: {}", .{err});
+        return;
+    };
+    defer b.allocator.free(encoded);
+    _ = encoder.encode(encoded, wasm_data);
+
+    const html = std.fs.cwd().readFileAlloc(b.allocator, "src/web/index.min.html", 10_000_000) catch |err| {
+        std.log.err("Failed to read HTML file: {}", .{err});
+        return;
+    };
+    defer b.allocator.free(html);
+
+    const script_start = std.mem.indexOf(u8, html, "<script>") orelse {
+        std.log.err("Could not find <script> tag", .{});
+        return;
+    };
+
+    const new_html = std.fmt.allocPrint(b.allocator, "{s}<script>const EMBEDDED_WASM='{s}';{s}", .{ html[0..script_start], encoded, html[script_start + 8 ..] }) catch |err| {
+        std.log.err("Failed to create embedded HTML: {}", .{err});
+        return;
+    };
+    defer b.allocator.free(new_html);
+
+    const output_path = std.fmt.allocPrint(b.allocator, "{s}/index.html", .{output_dir}) catch |err| {
+        std.log.err("Failed to format output path: {}", .{err});
+        return;
+    };
+    defer b.allocator.free(output_path);
+
+    const file = std.fs.cwd().createFile(output_path, .{}) catch |err| {
+        std.log.err("Failed to create file: {}", .{err});
+        return;
+    };
+    defer file.close();
+
+    file.writeAll(new_html) catch |err| {
+        std.log.err("Failed to write embedded HTML: {}", .{err});
+        return;
+    };
+
+    std.log.info("Created embedded HTML: {s}", .{output_path});
 }

@@ -147,8 +147,14 @@ async function loadWasm() {
             }
         };
     } else {
-        fetch('./star.wasm')
-        .then(response => response.arrayBuffer())
+        // Check if WASM is embedded in the page
+        const embeddedWasm = typeof EMBEDDED_WASM !== 'undefined' ? EMBEDDED_WASM : null;
+        
+        const wasmPromise = embeddedWasm 
+            ? Promise.resolve(Uint8Array.from(atob(embeddedWasm), c => c.charCodeAt(0)).buffer)
+            : fetch('./star.wasm').then(response => response.arrayBuffer());
+        
+        wasmPromise
         .then(wasmBytes => WebAssembly.compile(wasmBytes))
         .then(module => {
             wasmModule = module;
