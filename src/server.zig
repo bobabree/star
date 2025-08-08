@@ -14,7 +14,7 @@ const Thread = runtime.Thread;
 const Time = runtime.Time;
 
 // Embed HTML
-const html_content = runtime.html_content;
+const html_content = @embedFile("web/index.min.html");
 
 pub const HotReloader = struct {
     allocator: Mem.Allocator,

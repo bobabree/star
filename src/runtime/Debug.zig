@@ -302,10 +302,6 @@ const Level = enum(u8) {
     }
 };
 
-extern fn wasm_log(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
-extern fn wasm_warn(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
-extern fn wasm_err(msg_ptr: [*]const u8, msg_len: usize, style_ptr: [*]const u8, style_len: usize) void;
-
 comptime {
     assert(@intFromEnum(Level.err) == 0);
     assert(@intFromEnum(Level.success) == 1);

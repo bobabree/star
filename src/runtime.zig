@@ -11,6 +11,7 @@ pub const Mem = @import("runtime/Mem.zig");
 pub const MpscChannel = @import("runtime/MpscChannel.zig");
 pub const Net = @import("runtime/Net.zig");
 pub const Process = @import("runtime/Process.zig");
+pub const Terminal = @import("runtime/Terminal.zig");
 pub const Testing = @import("runtime/Testing.zig");
 pub const Time = @import("runtime/Time.zig");
 pub const Thread = @import("runtime/Thread.zig");
@@ -19,9 +20,6 @@ pub const Wasm = @import("runtime/Wasm.zig");
 
 pub const wasm = @import("wasm.zig");
 pub const server = @import("server.zig");
-
-// Embed files
-pub const html_content = @embedFile("web/index.min.html");
 
 // Tests
 test {

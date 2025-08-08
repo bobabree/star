@@ -316,20 +316,20 @@ pub fn buildUI() void {
 
     // Build UI structure
     _ = document.body().add(div().className("container").children(&.{
-        h1().textContent("WebAssembly Demo"),
-        //p().textContent("This demonstrates Zig code running in the browser via WebAssembly."),
+        // h1().textContent("WebAssembly Demo"),
+        // p().textContent("This demonstrates Zig code running in the browser via WebAssembly."),
 
-        div().children(&.{
-            button().textContent("Run Tests").onclick(runTests),
-            button().textContent("Install Package").onclick(installPackage),
-            installUrlElement,
-        }),
+        // div().children(&.{
+        //     button().textContent("Run Tests").onclick(runTests),
+        //     button().textContent("Install Package").onclick(installPackage),
+        //     installUrlElement,
+        // }),
 
-        div().children(&.{
-            num1Element,
-            num2Element,
-            button().textContent("Calculate").onclick(calculate),
-        }),
+        // div().children(&.{
+        //     num1Element,
+        //     num2Element,
+        //     button().textContent("Calculate").onclick(calculate),
+        // }),
 
         outputElement,
         terminalElement,

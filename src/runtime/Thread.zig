@@ -69,13 +69,13 @@ pub const TaskType = enum(u32) {
 
     fn hotReloadLoop(comptime self: TaskType) void {
         _ = self;
-        while (true) {
-            Debug.wasm.warn("Hot reloading!", .{});
-            checkWasmSize() catch |err| {
-                Debug.wasm.warn("Hot reload check failed: {}", .{err});
-                continue;
-            };
-        }
+        //while (true) {
+        Debug.wasm.warn("Hot reloading!", .{});
+        checkWasmSize() catch |err| {
+            Debug.wasm.warn("Hot reload check failed: {}", .{err});
+            //continue;
+        };
+        //}
     }
 };
 

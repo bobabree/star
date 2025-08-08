@@ -4,6 +4,7 @@ const Allocator = runtime.Mem.Allocator;
 const Debug = runtime.Debug;
 const FixedBufferAllocator = runtime.Heap.FixedBufferAllocator;
 const Mem = runtime.Mem;
+const Terminal = runtime.Terminal;
 const Thread = runtime.Thread;
 const Utf8Buffer = runtime.Utf8Buffer.Utf8Buffer;
 const Wasm = runtime.Wasm;
@@ -28,6 +29,8 @@ export fn _start() void {
     if (runtime.builtin.mode == .Debug) {
         startHotReload();
     }
+
+    Terminal.init();
 }
 
 var last_wasm_size: u32 = 0;
