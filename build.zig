@@ -236,12 +236,12 @@ const PlatformType = enum {
         wasm.import_table = false;
         wasm.export_table = false;
         wasm.shared_memory = false;
-        wasm.initial_memory = 65536 * 1;
-        wasm.max_memory = 65536 * 1;
-        wasm.global_base = 1024;
+        wasm.initial_memory = 65536 * 36;
+        wasm.max_memory = 65536 * 36;
+        // wasm.global_base = 1024;
 
-        // Stack size
-        wasm.stack_size = 16384;
+        // // Stack size
+        // wasm.stack_size = 16384;
 
         // Entry point
         wasm.entry = .disabled;
@@ -398,6 +398,18 @@ const PlatformType = enum {
 
             fn make(s: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
                 const es: *@This() = @fieldParentPtr("step", s);
+                // Verify file exists and has reasonable size
+                const file = std.fs.cwd().openFile(es.wasm_path, .{}) catch |err| {
+                    std.log.err("Cannot open WASM file: {}", .{err});
+                    return err;
+                };
+                defer file.close();
+
+                const stat = try file.stat();
+                if (stat.size < 5000) { // IMPORTANT: WASM corruption
+                    std.log.err("WASM file too small: {} bytes", .{stat.size});
+                    return error.CorruptedWasm;
+                }
                 prepareHtml(s.owner, es.wasm_path, es.output_dir, true);
             }
         };
@@ -480,27 +492,44 @@ fn pipeThrough(allocator: std.mem.Allocator, argv: []const []const u8, input: []
     return output;
 }
 
+fn compressLib(b: *std.Build, lib_content: []const u8) []const u8 {
+    var compressed = std.ArrayList(u8).init(b.allocator);
+    defer compressed.deinit();
+
+    var stream = std.io.fixedBufferStream(lib_content);
+    const reader = stream.reader();
+    const writer = compressed.writer();
+
+    std.compress.zlib.compress(reader, writer, .{ .level = .best }) catch @panic("Failed to compress");
+
+    return b.allocator.dupe(u8, compressed.items) catch @panic("OOM");
+}
+
 fn prepareHtml(b: *std.Build, wasm_path: []const u8, output_path: []const u8, embed_wasm: bool) void {
     const html = @embedFile("src/web/index.html");
-    const lib = @embedFile("src/web/build.lib");
+    const js_lib_obj = @embedFile("src/web/js.o");
+    const encoder = std.base64.standard.Encoder;
 
-    var final = replaceString(b.allocator, html, "<build.lib />", lib) orelse return;
+    // Compress js and save to js.lib
+    const js_lib = compressLib(b, js_lib_obj);
+    writeFile("src/runtime/js.lib", js_lib);
+
+    // <js.lib />
+    var final = replaceString(b.allocator, html, "<js.lib />", "") orelse return;
+
+    // <wasm.lib />
     if (embed_wasm) {
         const wasm_data = readFile(b.allocator, wasm_path, 10_000_000) orelse return;
-        const encoder = std.base64.standard.Encoder;
-        const encoded_len = encoder.calcSize(wasm_data.len);
-        const encoded = b.allocator.alloc(u8, encoded_len) catch |err| {
-            std.log.err("Failed to allocate for base64: {}\n", .{err});
-            return;
-        };
-        _ = encoder.encode(encoded, wasm_data);
+        const wasm_encoded = b.allocator.alloc(u8, encoder.calcSize(wasm_data.len)) catch return;
+        _ = encoder.encode(wasm_encoded, wasm_data);
 
-        const wasm_embedded = formatString(b.allocator, "<script>const EMBEDDED_WASM='{s}';</script>", .{encoded}) orelse return;
-        final = replaceString(b.allocator, final, "<wasm.o />", wasm_embedded) orelse return;
+        const wasm_embedded = formatString(b.allocator, "<script>const EMBEDDED_WASM='{s}';</script>", .{wasm_encoded}) orelse return;
+        final = replaceString(b.allocator, final, "<wasm.lib />", wasm_embedded) orelse return;
     } else {
-        final = replaceString(b.allocator, final, "<wasm.o />", "") orelse return;
+        final = replaceString(b.allocator, final, "<wasm.lib />", "") orelse return;
     }
 
+    //Minify
     const minified = pipeThrough(b.allocator, &.{
         "html-minifier-terser",
         "--collapse-whitespace",
@@ -516,6 +545,5 @@ fn prepareHtml(b: *std.Build, wasm_path: []const u8, output_path: []const u8, em
         writeFile(output_path, final);
         return;
     };
-
     writeFile(output_path, minified);
 }

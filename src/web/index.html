@@ -1,194 +1,211 @@
 <!DOCTYPE html>
 <html>
-<build.lib />
-<script>
-async function loadWasm() {
-    const isWorker = typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
-    let wasmExports;
-    let threads = [];
-    let wasmModule;
-    let elements = isWorker ? [] : [null, document.body];
-    
-    const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
+    <head>
+        <meta charset="UTF-8">
+        <title>Loading...</title>
+        <link rel="icon" href="data:,">
+        <style>
+            .xterm{cursor:text;position:relative;user-select:none;-ms-user-select:none;-webkit-user-select:none}.xterm.focus,.xterm:focus{outline:0}.xterm .xterm-helpers{position:absolute;top:0;z-index:5}.xterm .xterm-helper-textarea{padding:0;border:0;margin:0;position:absolute;opacity:0;left:-9999em;top:0;width:0;height:0;z-index:-5;white-space:nowrap;overflow:hidden;resize:none}.xterm .composition-view{background:#000;color:#fff;display:none;position:absolute;white-space:nowrap;z-index:1}.xterm .composition-view.active{display:block}.xterm .xterm-viewport{background-color:#000;overflow-y:scroll;cursor:default;position:absolute;right:0;left:0;top:0;bottom:0}.xterm .xterm-screen{position:relative}.xterm .xterm-screen canvas{position:absolute;left:0;top:0}.xterm .xterm-scroll-area{visibility:hidden}.xterm-char-measure-element{display:inline-block;visibility:hidden;position:absolute;top:0;left:-9999em;line-height:normal}.xterm.enable-mouse-events{cursor:default}.xterm .xterm-cursor-pointer,.xterm.xterm-cursor-pointer{cursor:pointer}.xterm.column-select.focus{cursor:crosshair}.xterm .xterm-accessibility:not(.debug),.xterm .xterm-message{position:absolute;left:0;top:0;bottom:0;right:0;z-index:10;color:transparent;pointer-events:none}.xterm .xterm-accessibility-tree:not(.debug) ::selection{color:transparent}.xterm .xterm-accessibility-tree{user-select:text;white-space:pre}.xterm .live-region{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}.xterm-dim{opacity:1!important}.xterm-underline-1{text-decoration:underline}.xterm-underline-2{text-decoration:double underline}.xterm-underline-3{text-decoration:wavy underline}.xterm-underline-4{text-decoration:dotted underline}.xterm-underline-5{text-decoration:dashed underline}.xterm-overline{text-decoration:overline}.xterm-overline.xterm-underline-1{text-decoration:overline underline}.xterm-overline.xterm-underline-2{text-decoration:overline double underline}.xterm-overline.xterm-underline-3{text-decoration:overline wavy underline}.xterm-overline.xterm-underline-4{text-decoration:overline dotted underline}.xterm-overline.xterm-underline-5{text-decoration:overline dashed underline}.xterm-strikethrough{text-decoration:line-through}.xterm-screen .xterm-decoration-container .xterm-decoration{z-index:6;position:absolute}.xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer{z-index:7}.xterm-decoration-overview-ruler{z-index:8;position:absolute;top:0;right:0;pointer-events:none}.xterm-decoration-top{z-index:2;position:relative}
+            /*# sourceMappingURL=/sm/97377c0c258e109358121823f5790146c714989366481f90e554c42277efb500.map */
+        </style>
+    </head>
+    <body>
+        <js.lib />
+        <wasm.lib />
+        <script>
+            async function loadWasm() {
+                const isWorker = typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
+                let wasmExports;
+                let threads = [];
+                let wasmModule;
+                let elements = isWorker ? [] : [null, document.body];
+                
+                const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
 
-    const dom_op = isWorker ? () => 0 : (op, id, ptr1, len1, ptr2, len2) => {
-        const s1 = len1 ? getString(ptr1, len1) : null;
-        const s2 = len2 ? getString(ptr2, len2) : null;
-        
-        switch(op) {
-            case 0: // createElement
-                const el = document.createElement(s1);
-                elements.push(el);
-                return elements.length - 1;
-                
-            case 1: // appendChild  
-                if (elements[id] && elements[ptr1])
-                    elements[id].appendChild(elements[ptr1]);
-                return 0;
-                
-            case 2: // setAttribute
-                if (elements[id]) elements[id].setAttribute(s1, s2);
-                return 0;
-                
-            case 3: // addEventListener
-                if (elements[id]) {
-                    elements[id].addEventListener(s1, () => wasmExports.invoke(ptr2));
-                }
-                return 0;
-                
-            case 4: // getValue
-                if (elements[id] && elements[id].value) {
-                    const value = elements[id].value;
-                    const bytes = new TextEncoder().encode(value);
-                    const copyLen = Math.min(bytes.length, len2);
-                    new Uint8Array(wasmExports.memory.buffer).set(bytes.slice(0, copyLen), ptr2);
-                    return copyLen;
-                }
-                return 0;
-                
-            case 5: // setInnerHTML
-                if (elements[id]) elements[id].innerHTML = s1;
-                return 0;
-                
-            case 6: // setTextContent
-                if (elements[id]) elements[id].textContent = s1;
-                return 0;
-                
-            case 7: // setClassName
-                if (elements[id]) elements[id].className = s1;
-                return 0;
-                
-            case 8: // setId
-                if (elements[id]) elements[id].id = s1;
-                return 0;
-                
-            case 9: // setTitle
-                document.title = s1;
-                return 0;
-                
-            case 10: // addStyleSheet
-                const style = document.createElement('style');
-                style.textContent = s1;
-                document.head.appendChild(style);
-                return 0;
-                
-            case 11: // reloadWasm
-                loadWasm();
-                return 0;
-                
-            default:
-                return 0;
-        }
-    };
+                const dom_op = isWorker ? () => 0 : (op, id, ptr1, len1, ptr2, len2) => {
+                    const s1 = len1 ? getString(ptr1, len1) : null;
+                    const s2 = len2 ? getString(ptr2, len2) : null;
+                    
+                    switch(op) {
+                        case 0: // createElement
+                            const el = document.createElement(s1);
+                            elements.push(el);
+                            return elements.length - 1;
+                            
+                        case 1: // appendChild  
+                            if (elements[id] && elements[ptr1])
+                                elements[id].appendChild(elements[ptr1]);
+                            return 0;
+                            
+                        case 2: // setAttribute
+                            if (elements[id]) elements[id].setAttribute(s1, s2);
+                            return 0;
+                            
+                        case 3: // addEventListener
+                            if (elements[id]) {
+                                elements[id].addEventListener(s1, () => wasmExports.invoke(ptr2));
+                            }
+                            return 0;
+                            
+                        case 4: // getValue
+                            if (elements[id] && elements[id].value) {
+                                const value = elements[id].value;
+                                const bytes = new TextEncoder().encode(value);
+                                const copyLen = Math.min(bytes.length, len2);
+                                new Uint8Array(wasmExports.memory.buffer).set(bytes.slice(0, copyLen), ptr2);
+                                return copyLen;
+                            }
+                            return 0;
+                            
+                        case 5: // setInnerHTML
+                            if (elements[id]) elements[id].innerHTML = s1;
+                            return 0;
+                            
+                        case 6: // setTextContent
+                            if (elements[id]) elements[id].textContent = s1;
+                            return 0;
+                            
+                        case 7: // setClassName
+                            if (elements[id]) elements[id].className = s1;
+                            return 0;
+                            
+                        case 8: // setId
+                            if (elements[id]) elements[id].id = s1;
+                            return 0;
+                            
+                        case 9: // setTitle
+                            document.title = s1;
+                            return 0;
+                            
+                        case 10: // addStyleSheet
+                            const style = document.createElement('style');
+                            style.textContent = s1;
+                            document.head.appendChild(style);
+                            return 0;
+                            
+                        case 11: // reloadWasm
+                            loadWasm();
+                            return 0;
 
-    const wasm_op = (op, id, ptr1, len1, ptr2, len2) => {
-        const s1 = len1 ? getString(ptr1, len1) : null;
-        const s2 = len2 ? getString(ptr2, len2) : null;
-        
-        switch(op) {
-            case 0: // log
-                console.log('%c' + s1, s2);
-                return 0;
+                        case 12: // linkJsLib
+                            const script = document.createElement('script');
+                            script.textContent = s1;
+                            document.head.appendChild(script);
+                        return 0;
+                            
+                        default:
+                            return 0;
+                    }
+                };
+
+                const wasm_op = (op, id, ptr1, len1, ptr2, len2) => {
+                    const s1 = len1 ? getString(ptr1, len1) : null;
+                    const s2 = len2 ? getString(ptr2, len2) : null;
+                    
+                    switch(op) {
+                        case 0: // log
+                            console.log('%c' + s1, s2);
+                            return 0;
+                            
+                        case 1: // warn
+                            console.warn('%c' + s1, s2);
+                            return 0;
+                            
+                        case 2: // err
+                            console.error('%c' + s1, s2);
+                            return 0;
+                            
+                        case 3: // createThread
+                            const threadCode = `(${loadWasm.toString()})()`;
+                            const thread = new Worker(URL.createObjectURL(
+                                new Blob([threadCode], { type: 'application/javascript' })
+                            ));
+                            const threadId = threads.length;
+                            
+                            thread.postMessage({ type: 'init', module: wasmModule, threadId: threadId });
+                            thread.postMessage({ type: 'run', task_id: id });
+                            
+                            threads.push(thread);
+                            return threadId;
+                            
+                        case 4: // threadJoin
+                            if (threads[id]) {
+                                threads[id].terminate();
+                            }
+                            return 0;
+                        
+                        case 5: // terminalInit
+                            if (!isWorker) {
+                                window.term = new Terminal();
+                                window.term.open(document.getElementById(s1));
+                                window.term.onData(data => {
+                                    for (let i = 0; i < data.length; i++) {
+                                        wasmExports.terminal_key(data.charCodeAt(i));
+                                    }
+                                });
+                            }
+                            return 0;
+                        case 6: // terminalWrite
+                            if (isWorker) {
+                                postMessage({type: 'terminal', text: s1});
+                            } else {
+                                if (window.term) window.term.write(s1);
+                            }
+                            return 0;
+                        default:
+                            return 0;
+                    }
+                };
+
+                const importObject = {
+                    env: {
+                        dom_op: dom_op,
+                        wasm_op: wasm_op,
+                    }
+                };
                 
-            case 1: // warn
-                console.warn('%c' + s1, s2);
-                return 0;
-                
-            case 2: // err
-                console.error('%c' + s1, s2);
-                return 0;
-                
-            case 3: // createThread
-                const threadCode = `(${loadWasm.toString()})()`;
-                const thread = new Worker(URL.createObjectURL(
-                    new Blob([threadCode], { type: 'application/javascript' })
-                ));
-                const threadId = threads.length;
-                
-                thread.postMessage({ type: 'init', module: wasmModule, threadId: threadId });
-                thread.postMessage({ type: 'run', task_id: id });
-                
-                threads.push(thread);
-                return threadId;
-                
-            case 4: // threadJoin
-                if (threads[id]) {
-                    threads[id].terminate();
-                }
-                return 0;
-            
-            case 5: // terminalInit
-                if (!isWorker) {
-                    window.term = new Terminal();
-                    window.term.open(document.getElementById(s1));
-                    window.term.onData(data => {
-                        for (let i = 0; i < data.length; i++) {
-                            wasmExports.terminal_key(data.charCodeAt(i));
+                if (isWorker) {
+                    onmessage = async function(e) {
+                        if (e.data.type === 'init') {
+                            wasmModule = e.data.module;
+                            const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
+                            wasmExports = wasmInstance.exports;
+                        } else if (e.data.type === 'run') {
+                            if (wasmExports) {
+                                wasmExports.invoke_thread_task(e.data.task_id);
+                            }
                         }
+                    };
+                } else {
+                    // Check if WASM is embedded in the page
+                    const embeddedWasm = typeof EMBEDDED_WASM !== 'undefined' ? EMBEDDED_WASM : null;
+                    
+                    const wasmPromise = embeddedWasm 
+                        ? Promise.resolve(Uint8Array.from(atob(embeddedWasm), c => c.charCodeAt(0)).buffer)
+                        : fetch('./star.wasm').then(response => response.arrayBuffer());
+                    
+                    wasmPromise
+                    .then(wasmBytes => WebAssembly.compile(wasmBytes))
+                    .then(module => {
+                        wasmModule = module;
+                        return WebAssembly.instantiate(module, importObject);
+                    })
+                    .then(instance => {
+                        wasmExports = instance.exports;
+                        elements = [null, document.body];
+                        threads = [];
+                        
+                        if (wasmExports._start) {
+                            console.log('wasmExports: ', wasmExports);
+                            wasmExports._start();
+                        }
+                    })
+                    .catch(error => {
+                        console.log('Error loading WebAssembly:', error);
                     });
                 }
-                return 0;
-            case 6: // terminalWrite
-                if (isWorker) {
-                    postMessage({type: 'terminal', text: s1});
-                } else {
-                    if (window.term) window.term.write(s1);
-                }
-                return 0;
-            default:
-                return 0;
-        }
-    };
-
-    const importObject = {
-        env: {
-            dom_op: dom_op,
-            wasm_op: wasm_op,
-        }
-    };
-    
-    if (isWorker) {
-        onmessage = async function(e) {
-            if (e.data.type === 'init') {
-                wasmModule = e.data.module;
-                const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
-                wasmExports = wasmInstance.exports;
-            } else if (e.data.type === 'run') {
-                if (wasmExports) {
-                    wasmExports.invoke_thread_task(e.data.task_id);
-                }
             }
-        };
-    } else {
-        // Check if WASM is embedded in the page
-        const embeddedWasm = typeof EMBEDDED_WASM !== 'undefined' ? EMBEDDED_WASM : null;
-        
-        const wasmPromise = embeddedWasm 
-            ? Promise.resolve(Uint8Array.from(atob(embeddedWasm), c => c.charCodeAt(0)).buffer)
-            : fetch('./star.wasm').then(response => response.arrayBuffer());
-        
-        wasmPromise
-        .then(wasmBytes => WebAssembly.compile(wasmBytes))
-        .then(module => {
-            wasmModule = module;
-            return WebAssembly.instantiate(module, importObject);
-        })
-        .then(instance => {
-            wasmExports = instance.exports;
-            elements = [null, document.body];
-            threads = [];
-            
-            if (wasmExports._start) {
-                console.log('wasmExports: ', wasmExports);
-                wasmExports._start();
-            }
-        })
-        .catch(error => {
-            console.log('Error loading WebAssembly:', error);
-        });
-    }
-}
-loadWasm();
-</script>
-</body>
+            loadWasm();
+        </script>
+    </body>
 </html>

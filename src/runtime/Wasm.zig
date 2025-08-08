@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const Allocator = @import("Mem.zig").Allocator;
 const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
@@ -26,6 +27,7 @@ const DomOp = enum(u32) {
     setTitle = 9,
     addStyleSheet = 10,
     reloadWasm = 11,
+    linkJsLib = 12,
 
     pub fn invoke(comptime self: DomOp, args: anytype) u32 {
         return switch (self) {
@@ -41,6 +43,8 @@ const DomOp = enum(u32) {
             .setTitle => dom_op(@intFromEnum(self), 0, args.title.ptr, @intCast(args.title.len), null, 0),
             .addStyleSheet => dom_op(@intFromEnum(self), 0, args.css.ptr, @intCast(args.css.len), null, 0),
             .reloadWasm => dom_op(@intFromEnum(self), 0, null, 0, null, 0),
+            .linkJsLib => dom_op(@intFromEnum(self), 0, args.code.ptr, @intCast(args.code.len), null, 0),
+            //TODO linkLibWasm
         };
     }
 };
@@ -138,6 +142,31 @@ pub fn terminalInit(element_id: []const u8) void {
 
 pub fn terminalWrite(text: []const u8) void {
     _ = WasmOp.terminalWrite.invoke(.{ .text = text });
+}
+
+const js_lib = @embedFile("js.lib");
+
+pub fn linkLibs(allocator: Allocator) !void {
+    linkJsLib(allocator) catch |err| {
+        Debug.wasm.err("Failed to link js lib: {}", .{err});
+    };
+
+    // TODO: Link Wasm
+}
+
+fn linkJsLib(allocator: Allocator) !void {
+    // Allocate space for decompression
+    const decompressed = try allocator.alloc(u8, 512 * 1024);
+    defer allocator.free(decompressed);
+
+    // Decompress first
+    var in_stream = std.io.fixedBufferStream(js_lib);
+    var out_stream = std.io.fixedBufferStream(decompressed);
+
+    try std.compress.zlib.decompress(in_stream.reader(), out_stream.writer());
+
+    // Link the JavaScript
+    _ = DomOp.linkJsLib.invoke(.{ .code = decompressed[0..out_stream.pos] });
 }
 
 pub const Element = struct {

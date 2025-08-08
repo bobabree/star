@@ -9,13 +9,18 @@ const Thread = runtime.Thread;
 const Utf8Buffer = runtime.Utf8Buffer.Utf8Buffer;
 const Wasm = runtime.Wasm;
 
-var buffer: [1024]u8 = undefined;
+var buffer: [1024 * 1024]u8 = undefined;
 var fba: FixedBufferAllocator = undefined;
 var allocator: Allocator = undefined;
 
 export fn _start() void {
     fba = FixedBufferAllocator.init(&buffer);
     allocator = fba.allocator();
+
+    // Link js/wasm libs
+    Wasm.linkLibs(allocator) catch |err| {
+        Debug.wasm.err("Failed to link libs: {}", .{err});
+    };
 
     // Build the UI
     Wasm.buildUI();
