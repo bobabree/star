@@ -19,8 +19,8 @@ export fn terminal_key(char: u8) void {
         input_len = 0;
 
         // Show prompt
-        Wasm.terminalWrite("$ ");
-    } else if (char == 8) { // Backspace
+        Wasm.terminalWrite("\r\n$ ");
+    } else if (char == 127 or char == 8) { // Backspace
         if (input_len > 0) {
             input_len -= 1;
             Wasm.terminalWrite("\x08 \x08"); // Move back, space, move back

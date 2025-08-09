@@ -236,8 +236,8 @@ const PlatformType = enum {
         wasm.import_table = false;
         wasm.export_table = false;
         wasm.shared_memory = false;
-        wasm.initial_memory = 65536 * 36;
-        wasm.max_memory = 65536 * 36;
+        wasm.initial_memory = 65536 * 34;
+        wasm.max_memory = 65536 * 34;
         // wasm.global_base = 1024;
 
         // // Stack size

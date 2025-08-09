@@ -4,6 +4,10 @@ const Allocator = @import("Mem.zig").Allocator;
 const Debug = @import("Debug.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
+// Static JavaScript/WebAssembly libs that Zig can directly call into
+const js_lib = @embedFile("js.lib");
+// const wasm_lib = @embedFile("wasm.lib");
+
 // Extern functions for WASM w/ conditional stubs for testing
 const dom_op = if (Debug.is_wasm) struct {
     extern fn dom_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
@@ -25,9 +29,8 @@ const DomOp = enum(u32) {
     setClassName = 7,
     setId = 8,
     setTitle = 9,
-    addStyleSheet = 10,
+    addHeadElement = 10,
     reloadWasm = 11,
-    linkJsLib = 12,
 
     pub fn invoke(comptime self: DomOp, args: anytype) u32 {
         return switch (self) {
@@ -41,10 +44,8 @@ const DomOp = enum(u32) {
             .setClassName => dom_op(@intFromEnum(self), args.id, args.class_name.ptr, @intCast(args.class_name.len), null, 0),
             .setId => dom_op(@intFromEnum(self), args.id, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
             .setTitle => dom_op(@intFromEnum(self), 0, args.title.ptr, @intCast(args.title.len), null, 0),
-            .addStyleSheet => dom_op(@intFromEnum(self), 0, args.css.ptr, @intCast(args.css.len), null, 0),
+            .addHeadElement => dom_op(@intFromEnum(self), 0, args.content.ptr, @intCast(args.content.len), args.element_type.ptr, @intCast(args.element_type.len)),
             .reloadWasm => dom_op(@intFromEnum(self), 0, null, 0, null, 0),
-            .linkJsLib => dom_op(@intFromEnum(self), 0, args.code.ptr, @intCast(args.code.len), null, 0),
-            //TODO linkLibWasm
         };
     }
 };
@@ -91,7 +92,11 @@ fn setTitle(title: []const u8) void {
 }
 
 fn addStyleSheet(css: []const u8) void {
-    _ = DomOp.addStyleSheet.invoke(.{ .css = css });
+    _ = DomOp.addHeadElement.invoke(.{ .content = css, .element_type = "style" });
+}
+
+fn addJsLib(content: []const u8) void {
+    _ = DomOp.addHeadElement.invoke(.{ .content = content, .element_type = "script" });
 }
 
 fn reloadWasm() void {
@@ -144,14 +149,12 @@ pub fn terminalWrite(text: []const u8) void {
     _ = WasmOp.terminalWrite.invoke(.{ .text = text });
 }
 
-const js_lib = @embedFile("js.lib");
-
 pub fn linkLibs(allocator: Allocator) !void {
     linkJsLib(allocator) catch |err| {
-        Debug.wasm.err("Failed to link js lib: {}", .{err});
+        Debug.wasm.err("Failed to link js.lib: {}", .{err});
     };
 
-    // TODO: Link Wasm
+    // TODO: Link Wasm libs if needed in the future
 }
 
 fn linkJsLib(allocator: Allocator) !void {
@@ -165,8 +168,8 @@ fn linkJsLib(allocator: Allocator) !void {
 
     try std.compress.zlib.decompress(in_stream.reader(), out_stream.writer());
 
-    // Link the JavaScript
-    _ = DomOp.linkJsLib.invoke(.{ .code = decompressed[0..out_stream.pos] });
+    // Add the JavaScript
+    _ = addJsLib(decompressed[0..out_stream.pos]);
 }
 
 pub const Element = struct {
@@ -280,11 +283,6 @@ const Events = struct {
     }
 };
 
-// UI elements for later reference
-pub var outputElement: Element = undefined;
-var installUrlElement: Element = undefined;
-var num1Element: Element = undefined;
-var num2Element: Element = undefined;
 pub var terminalElement: Element = undefined;
 
 // Event handlers
@@ -302,65 +300,17 @@ fn runTests() void {
     }
 }
 
-fn installPackage() void {
-    var url_buffer: [256]u8 = undefined;
-    const url = installUrlElement.getInputValue(&url_buffer);
-
-    Debug.wasm.info("📦 Installing package from URL: {s}", .{url});
-}
-
-fn calculate() void {
-    var num1_buffer: [32]u8 = undefined;
-    var num2_buffer: [32]u8 = undefined;
-
-    const num1_str = num1Element.getInputValue(&num1_buffer);
-    const num2_str = num2Element.getInputValue(&num2_buffer);
-
-    const num1 = std.fmt.parseInt(i32, num1_str, 10) catch 0;
-    const num2 = std.fmt.parseInt(i32, num2_str, 10) catch 0;
-
-    const result = num1 + num2;
-
-    Debug.wasm.info("Calculated: {d} + {d} = {d}", .{ num1, num2, result });
-
-    var buffer: [256]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buffer, "Calculated: {d} + {d} = {d}\r\n$ ", .{ num1, num2, result }) catch return;
-    terminalWrite(msg);
-}
-
 // Build the UI
 pub fn buildUI() void {
     document.title("Zig WebAssembly Demo");
 
-    document.addCSS("body{font-family:monospace}button{background:#007acc}");
-
-    // Store elements for later use
-    outputElement = div().elementId("output").innerHTML("📁 Output:");
-    installUrlElement = input().elementId("install-url").inputType("text").placeholder("Package URL").value("https://github.com/nlohmann/json");
-    num1Element = input().elementId("num1").inputType("number").placeholder("First number").value("5");
-    num2Element = input().elementId("num2").inputType("number").placeholder("Second number").value("3");
+    document.addCSS("body{background:#000}");
 
     // Store terminal element
     terminalElement = div().elementId("terminal");
 
     // Build UI structure
     _ = document.body().add(div().className("container").children(&.{
-        // h1().textContent("WebAssembly Demo"),
-        // p().textContent("This demonstrates Zig code running in the browser via WebAssembly."),
-
-        // div().children(&.{
-        //     button().textContent("Run Tests").onclick(runTests),
-        //     button().textContent("Install Package").onclick(installPackage),
-        //     installUrlElement,
-        // }),
-
-        // div().children(&.{
-        //     num1Element,
-        //     num2Element,
-        //     button().textContent("Calculate").onclick(calculate),
-        // }),
-
-        outputElement,
         terminalElement,
     }));
 
@@ -368,6 +318,80 @@ pub fn buildUI() void {
     terminalWrite("⭐️ Star Terminal Ready!\r\n");
     terminalWrite("Type commands here...\r\n$ ");
 }
+
+// Example:
+// // UI elements for later reference
+// pub var outputElement: Element = undefined;
+// var installUrlElement: Element = undefined;
+// var num1Element: Element = undefined;
+// var num2Element: Element = undefined;
+
+// // Event handlers
+// fn installPackage() void {
+//     var url_buffer: [256]u8 = undefined;
+//     const url = installUrlElement.getInputValue(&url_buffer);
+
+//     Debug.wasm.info("📦 Installing package from URL: {s}", .{url});
+// }
+
+// fn calculate() void {
+//     var num1_buffer: [32]u8 = undefined;
+//     var num2_buffer: [32]u8 = undefined;
+
+//     const num1_str = num1Element.getInputValue(&num1_buffer);
+//     const num2_str = num2Element.getInputValue(&num2_buffer);
+
+//     const num1 = std.fmt.parseInt(i32, num1_str, 10) catch 0;
+//     const num2 = std.fmt.parseInt(i32, num2_str, 10) catch 0;
+
+//     const result = num1 + num2;
+
+//     Debug.wasm.info("Calculated: {d} + {d} = {d}", .{ num1, num2, result });
+
+//     var buffer: [256]u8 = undefined;
+//     const msg = std.fmt.bufPrint(&buffer, "Calculated: {d} + {d} = {d}\r\n$ ", .{ num1, num2, result }) catch return;
+//     terminalWrite(msg);
+// }
+
+// pub fn exampleBuildHtml() void {
+//     document.title("Zig WebAssembly Demo");
+
+//     document.addCSS("body{font-family:monospace}button{background:#007acc}");
+
+//     // Store elements for later use
+//     outputElement = div().elementId("output").innerHTML("📁 Output:");
+//     installUrlElement = input().elementId("install-url").inputType("text").placeholder("Package URL").value("https://github.com/nlohmann/json");
+//     num1Element = input().elementId("num1").inputType("number").placeholder("First number").value("5");
+//     num2Element = input().elementId("num2").inputType("number").placeholder("Second number").value("3");
+
+//     // Store terminal element
+//     terminalElement = div().elementId("terminal");
+
+//     // Build UI structure
+//     _ = document.body().add(div().className("container").children(&.{
+//         h1().textContent("WebAssembly Demo"),
+//         p().textContent("This demonstrates Zig code running in the browser via WebAssembly."),
+
+//         div().children(&.{
+//             button().textContent("Run Tests").onclick(runTests),
+//             button().textContent("Install Package").onclick(installPackage),
+//             installUrlElement,
+//         }),
+
+//         div().children(&.{
+//             num1Element,
+//             num2Element,
+//             button().textContent("Calculate").onclick(calculate),
+//         }),
+
+//         outputElement,
+//         terminalElement,
+//     }));
+
+//     terminalInit("terminal");
+//     terminalWrite("⭐️ Star Terminal Ready!\r\n");
+//     terminalWrite("Type commands here...\r\n$ ");
+// }
 
 const Testing = @import("Testing.zig");
 
