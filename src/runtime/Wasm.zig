@@ -1,7 +1,8 @@
-const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = @import("Mem.zig").Allocator;
+const Compress = @import("Compress.zig");
 const Debug = @import("Debug.zig");
+const IO = @import("IO.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 // Static JavaScript/WebAssembly libs that Zig can directly call into
@@ -163,10 +164,10 @@ fn linkJsLib(allocator: Allocator) !void {
     defer allocator.free(decompressed);
 
     // Decompress first
-    var in_stream = std.io.fixedBufferStream(js_lib);
-    var out_stream = std.io.fixedBufferStream(decompressed);
+    var in_stream = IO.fixedBufferStream(js_lib);
+    var out_stream = IO.fixedBufferStream(decompressed);
 
-    try std.compress.zlib.decompress(in_stream.reader(), out_stream.writer());
+    try Compress.zlib.decompress(in_stream.reader(), out_stream.writer());
 
     // Add the JavaScript
     _ = addJsLib(decompressed[0..out_stream.pos]);
@@ -302,7 +303,7 @@ fn runTests() void {
 
 // Build the UI
 pub fn buildUI() void {
-    document.title("Zig WebAssembly Demo");
+    document.title("Star Demo");
 
     document.addCSS("body{background:#000}");
 

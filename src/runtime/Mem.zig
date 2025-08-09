@@ -1,5 +1,5 @@
-const math = @import("std").math;
 const mem = @import("std").mem;
+const Math = @import("Math.zig");
 
 pub const Alignment = mem.Alignment;
 pub const Allocator = mem.Allocator;
@@ -14,7 +14,7 @@ pub const span = mem.span;
 const Debug = @import("Debug.zig");
 
 pub fn fromByteUnits(n: usize) mem.Alignment {
-    Debug.assert(math.isPowerOfTwo(n));
+    Debug.assert(Math.isPowerOfTwo(n));
     return @enumFromInt(@ctz(n));
 }
 

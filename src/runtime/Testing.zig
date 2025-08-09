@@ -1,5 +1,4 @@
 const testing = @import("std").testing;
-const SourceLocation = @import("std").builtin.SourceLocation;
 
 pub const expect = testing.expect;
 pub const expectEqual = testing.expectEqual;
@@ -13,6 +12,8 @@ const Debug = @import("Debug.zig");
 const Heap = @import("Heap.zig");
 const Mem = @import("Mem.zig");
 const Time = @import("Time.zig");
+const Builtin = @import("Builtin.zig");
+const SourceLocation = Builtin.SourceLocation;
 
 pub const ProfiledTest = struct {
     name: []const u8,

@@ -6,6 +6,8 @@ const Mem = runtime.Mem;
 const Process = runtime.Process;
 const Server = runtime.server.Server;
 const Debug = runtime.Debug;
+const Thread = runtime.Thread;
+const Time = runtime.Time;
 
 pub fn main() !void {
     if (Debug.is_wasm) {
@@ -20,7 +22,6 @@ pub fn main() !void {
     if (Debug.is_ios) {
         Debug.ios.success("Hello World from Zig iOS!", .{});
     } else {
-        // Check for --dev
         // TODO: non-alloc solution
         const args = try Process.argsAlloc(allocator);
         defer Process.argsFree(allocator, args);
@@ -29,9 +30,18 @@ pub fn main() !void {
             if (Mem.eql(u8, arg, "--dev")) break true;
         } else false;
 
-        // TODO: Check for --web flag
-        // TODO: maybe use wasi?
-        var server = Server.init(allocator, is_dev);
-        try server.run();
+        if (is_dev) {
+            var server = Server.init(allocator, is_dev);
+            // Run server in background thread
+            const server_thread = try Thread.spawn(.{}, Server.run, .{&server});
+            server_thread.detach();
+        }
+
+        // TODO: Main thread
+        while (true) {
+            const timestamp = Time.timestamp();
+            Debug.default.success("\nCurrent time: {}", .{timestamp});
+            Thread.sleep(1 * Time.ns_per_s);
+        }
     }
 }

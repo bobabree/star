@@ -1,9 +1,8 @@
-const unicode = @import("std").unicode;
-const bufPrintZ = @import("std").fmt.bufPrintZ;
-
-const Mem = @import("Mem.zig");
 const Debug = @import("Debug.zig");
 const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
+const Fmt = @import("Fmt.zig");
+const Mem = @import("Mem.zig");
+const Unicode = @import("Unicode.zig");
 
 pub fn Utf8Buffer(comptime capacity: usize) type {
     comptime {
@@ -30,7 +29,7 @@ pub fn Utf8Buffer(comptime capacity: usize) type {
             Debug.assert(self._buffer.len <= capacity);
 
             var temp_buf: [capacity]u8 = undefined;
-            const formatted = bufPrintZ(&temp_buf, fmt, args) catch |err| {
+            const formatted = Fmt.bufPrintZ(&temp_buf, fmt, args) catch |err| {
                 Debug.panic("format failed with error {}: formatted string exceeds capacity {}", .{ err, capacity });
             };
 
@@ -144,7 +143,7 @@ pub fn Utf8Buffer(comptime capacity: usize) type {
                 if (char_index == pos) {
                     const char_len = utf8CharLen(self._buffer.slice()[byte_pos]);
                     const utf8_bytes = self._buffer.slice()[byte_pos .. byte_pos + char_len];
-                    return unicode.utf8Decode(utf8_bytes) catch |err| {
+                    return Unicode.utf8Decode(utf8_bytes) catch |err| {
                         Debug.panic("charAt: utf8Decode failed with error {}", .{err});
                     };
                 }
@@ -173,7 +172,7 @@ pub fn Utf8Buffer(comptime capacity: usize) type {
             Debug.panicAssert(byte_pos <= self._buffer.len, "insertAt: character position {} exceeds string length", .{pos});
 
             var utf8_bytes = zbuf(u8, 4);
-            const utf_len = unicode.utf8Encode(char, &utf8_bytes) catch |err| {
+            const utf_len = Unicode.utf8Encode(char, &utf8_bytes) catch |err| {
                 Debug.panic("utf8Encode failed with error {}: invalid char 0x{x}", .{ err, char });
             };
             self._buffer.insertSlice(byte_pos, utf8_bytes[0..utf_len]);
@@ -198,7 +197,7 @@ pub fn Utf8Buffer(comptime capacity: usize) type {
 
             const utf_len = utf8CharLen(self._buffer.slice()[byte_pos]);
             const bytes_to_remove = self._buffer.slice()[byte_pos .. byte_pos + utf_len];
-            _ = unicode.utf8Decode(bytes_to_remove) catch |err| {
+            _ = Unicode.utf8Decode(bytes_to_remove) catch |err| {
                 Debug.panic("utf8Decode failed with error {}: invalid UTF-8 bytes", .{err});
             };
             self._buffer.replaceRange(byte_pos, utf_len, &[_]u8{});
@@ -239,20 +238,20 @@ pub inline fn zbuf(comptime T: type, comptime size: usize) [size]T {
 
 /// UTF-8 utility functions
 fn utf8CharLen(first_byte: u8) u3 {
-    return unicode.utf8ByteSequenceLength(first_byte) catch |err| {
+    return Unicode.utf8ByteSequenceLength(first_byte) catch |err| {
         Debug.panic("utf8CharLen failed with error {}: invalid UTF-8 start byte 0x{x}", .{ err, first_byte });
     };
 }
 
 fn utf8CharCount(text: []const u8) usize {
     Debug.assert(isValidUtf8(text));
-    return unicode.utf8CountCodepoints(text) catch |err| {
+    return Unicode.utf8CountCodepoints(text) catch |err| {
         Debug.panic("utf8CharCount failed with error {}: invalid UTF-8 input", .{err});
     };
 }
 
 fn isValidUtf8(text: []const u8) bool {
-    return unicode.utf8ValidateSlice(text);
+    return Unicode.utf8ValidateSlice(text);
 }
 
 const Testing = @import("Testing.zig");
@@ -289,8 +288,6 @@ test "Utf8Buffer" {
     try Testing.expectEqualStrings("café au lait", buf.constSlice());
 
     // Test charAt
-
-    //@import("std").Debug.print("Expected 'é': {d} (0x{x})\n", .{ 'é', 'é' });
     try Testing.expectEqual(buf.charAt(0), 'c');
     try Testing.expectEqual(buf.charAt(1), 'a');
     try Testing.expectEqual(buf.charAt(2), 'f');

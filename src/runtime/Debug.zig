@@ -1,4 +1,5 @@
 const builtin = @import("builtin");
+const debug = @import("std").debug;
 
 const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const IO = @import("IO.zig");
@@ -7,9 +8,9 @@ const Thread = @import("Thread.zig");
 const Wasm = @import("Wasm.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
-const dumpCurrentStackTrace = @import("std").debug.dumpCurrentStackTrace;
-const panicExtra = @import("std").debug.panicExtra;
-const print = @import("std").debug.print; // TODO: thread_local?
+const dumpCurrentStackTrace = debug.dumpCurrentStackTrace;
+const panicExtra = debug.panicExtra;
+const print = debug.print; // TODO: thread_local?
 
 pub const is_wasm = builtin.target.cpu.arch.isWasm();
 pub const is_ios = builtin.target.os.tag == .ios;
