@@ -3,6 +3,7 @@ const Allocator = @import("Mem.zig").Allocator;
 const Compress = @import("Compress.zig");
 const Debug = @import("Debug.zig");
 const IO = @import("IO.zig");
+const OS = @import("OS.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 // Static JavaScript/WebAssembly libs that Zig can directly call into
@@ -10,7 +11,7 @@ const js_lib = @embedFile("js.lib");
 // const wasm_lib = @embedFile("wasm.lib");
 
 // Extern functions for WASM w/ conditional stubs for testing
-const dom_op = if (Debug.is_wasm) struct {
+const dom_op = if (OS.is_wasm) struct {
     extern fn dom_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
 }.dom_op else (struct {
     fn f(_: u32, _: u32, _: ?[*]const u8, _: u32, _: ?[*]const u8, _: u32) u32 {
@@ -104,7 +105,7 @@ fn reloadWasm() void {
     _ = DomOp.reloadWasm.invoke(.{});
 }
 
-const wasm_op = if (Debug.is_wasm) struct {
+const wasm_op = if (OS.is_wasm) struct {
     extern fn wasm_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
 }.wasm_op else (struct {
     fn f(_: u32, _: u32, _: ?[*]const u8, _: u32, _: ?[*]const u8, _: u32) u32 {
@@ -305,7 +306,7 @@ fn runTests() void {
 pub fn buildUI() void {
     document.title("Star Demo");
 
-    document.addCSS("body{background:#000}");
+    //document.addCSS("body{background:#000}");
 
     // Store terminal element
     terminalElement = div().elementId("terminal");

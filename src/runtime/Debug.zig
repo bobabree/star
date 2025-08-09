@@ -4,6 +4,7 @@ const debug = @import("std").debug;
 const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const IO = @import("IO.zig");
 const Mem = @import("Mem.zig");
+const OS = @import("OS.zig");
 const Thread = @import("Thread.zig");
 const Wasm = @import("Wasm.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
@@ -11,9 +12,6 @@ const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 const dumpCurrentStackTrace = debug.dumpCurrentStackTrace;
 const panicExtra = debug.panicExtra;
 const print = debug.print; // TODO: thread_local?
-
-pub const is_wasm = builtin.target.cpu.arch.isWasm();
-pub const is_ios = builtin.target.os.tag == .ios;
 
 pub const js = Scope.js;
 pub const wasm = Scope.wasm;
@@ -154,7 +152,7 @@ const Scope = enum(u8) {
     pub fn assert(comptime self: Scope, condition: bool, ret_addr: usize) void {
         if (!condition) {
             self.err("assertion failed at 0x{x}", .{ret_addr});
-            if (is_wasm) {
+            if (OS.is_wasm) {
                 self.dumpWasmStack();
             }
             unreachable; // assertion failure
@@ -165,7 +163,7 @@ const Scope = enum(u8) {
         @branchHint(.cold);
         self.err(format, args);
         self.err("panic at 0x{x}", .{ret_addr});
-        if (is_wasm) {
+        if (OS.is_wasm) {
             self.dumpWasmStack();
         }
         panicExtra(@returnAddress(), format, args);
@@ -208,7 +206,7 @@ const Scope = enum(u8) {
     }
 
     fn logMessage(comptime self: Scope, comptime message_level: Level, message: []const u8) void {
-        if (is_wasm) {
+        if (OS.is_wasm) {
             self.wasmPrint(message_level, message);
         } else {
             print(message_level.asAnsiColor() ++ "{s}\x1b[0m", .{message});
@@ -253,9 +251,9 @@ const Scope = enum(u8) {
         var buffer = Utf8Buffer(1024).init();
         const task = getCurrentTask();
         if (task == Thread.TaskType.default)
-            buffer.format(prefix ++ format, args)
+            buffer.format(prefix ++ format ++ "\n", args)
         else
-            buffer.format("[{s}]" ++ prefix ++ format, .{@tagName(task)} ++ args);
+            buffer.format("[{s}]" ++ prefix ++ format ++ "\n", .{@tagName(task)} ++ args);
 
         const message = buffer.constSlice();
         self.logMessage(message_level, message);

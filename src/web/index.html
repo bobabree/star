@@ -129,7 +129,10 @@
                         
                         case 5: // terminalInit
                             if (!isWorker) {
-                                window.term = new Terminal();
+                                window.term = new Terminal({
+                                    cols: Math.floor(window.innerWidth / 9.1),
+                                    rows: Math.floor(window.innerHeight / 17)
+                                });
                                 window.term.open(document.getElementById(s1));
                                 window.term.onData(data => {
                                     for (let i = 0; i < data.length; i++) {

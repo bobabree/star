@@ -14,6 +14,7 @@ pub const Math = @import("runtime/Math.zig");
 pub const Mem = @import("runtime/Mem.zig");
 pub const MpscChannel = @import("runtime/MpscChannel.zig");
 pub const Net = @import("runtime/Net.zig");
+pub const OS = @import("runtime/OS.zig");
 pub const Process = @import("runtime/Process.zig");
 pub const Terminal = @import("runtime/Terminal.zig");
 pub const Testing = @import("runtime/Testing.zig");

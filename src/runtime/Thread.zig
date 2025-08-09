@@ -1,13 +1,14 @@
 const thread = @import("std").Thread;
 const Debug = @import("Debug.zig");
+const OS = @import("OS.zig");
 
-const Thread = if (Debug.is_wasm) WasmThread else thread;
+const Thread = if (OS.is_wasm) WasmThread else thread;
 const SpawnConfig = thread.SpawnConfig;
 const SpawnError = thread.SpawnError;
 const Wasm = @import("Wasm.zig");
 
 pub fn spawn(config: SpawnConfig, comptime function: anytype, args: anytype) SpawnError!Thread {
-    if (Debug.is_wasm) {
+    if (OS.is_wasm) {
         return wasmSpawn(config, function, args);
     } else {
         return Thread.spawn(config, function, args);
