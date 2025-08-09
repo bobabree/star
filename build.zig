@@ -339,14 +339,28 @@ const PlatformType = enum {
     pub fn installArtifacts(comptime self: PlatformType, options: BuildOptions, server: *std.Build.Step.Compile, wasm: *std.Build.Step.Compile) void {
         if (self.isIOS()) return; // iOS install handled in setupIOS
 
-        // Install server
-        const server_install = options.b.addInstallArtifact(server, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
-        if (options.install_step) |step| {
-            step.dependOn(&server_install.step);
-        }
+        // Install the primary artifact for this platform
+        const primary_artifact = if (self.isWasm()) wasm else server;
+        self.installNativePlatform(options, primary_artifact);
 
-        // Install and optimize wasm
-        const wasm_install = options.b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
+        // Process wasm
+        self.installWasmPlatform(options, wasm, primary_artifact);
+    }
+
+    fn installNativePlatform(comptime self: PlatformType, options: BuildOptions, artifact: *std.Build.Step.Compile) void {
+        _ = self;
+        const install = options.b.addInstallArtifact(artifact, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
+        if (options.install_step) |step| {
+            step.dependOn(&install.step);
+        }
+    }
+
+    fn installWasmPlatform(comptime self: PlatformType, options: BuildOptions, wasm: *std.Build.Step.Compile, primary_artifact: *std.Build.Step.Compile) void {
+        const wasm_install = if (self.isWasm())
+            options.b.addInstallArtifact(primary_artifact, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } })
+        else
+            options.b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
+
         const optimized_wasm = self.optimizeWasm(options, &wasm_install.step);
 
         if (options.install_step) |step| {

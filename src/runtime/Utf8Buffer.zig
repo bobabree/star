@@ -257,7 +257,7 @@ fn isValidUtf8(text: []const u8) bool {
 
 const Testing = @import("Testing.zig");
 
-test Utf8Buffer {
+test "Utf8Buffer" {
     // Test init
     var buf = Utf8Buffer(64).init();
     try Testing.expectEqual(buf.len(), 0);
