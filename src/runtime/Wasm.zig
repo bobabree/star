@@ -317,8 +317,12 @@ pub fn buildUI() void {
     }));
 
     terminalInit("terminal");
-    terminalWrite("⭐️ Star Terminal Ready!\r\n");
-    terminalWrite("Type commands here...\r\n$ ");
+
+    // Fish-style greeting
+    terminalWrite("Welcome to \x1b[1;36mStarOS\x1b[0m\r\n");
+    terminalWrite("Type \x1b[1;32mhelp\x1b[0m for instructions on how to use StarOS\r\n");
+    // Fish-style prompt
+    terminalWrite("\x1b[1;32mroot\x1b[0m@\x1b[1;36mStarOS\x1b[0m \x1b[1;32m~\x1b[0m> ");
 }
 
 // Example:

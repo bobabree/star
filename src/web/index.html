@@ -130,8 +130,7 @@
                         case 5: // terminalInit
                             if (!isWorker) {
                                 window.term = new Terminal({
-                                    cols: Math.floor(window.innerWidth / 9.1),
-                                    rows: Math.floor(window.innerHeight / 17)
+                                    cols: Math.floor(window.innerWidth / 9.2),
                                 });
                                 window.term.open(document.getElementById(s1));
                                 window.term.onData(data => {

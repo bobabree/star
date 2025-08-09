@@ -12,7 +12,7 @@ pub const Child = process.Child;
 
 pub const ArgsBuffer = FixedBuffer(Utf8Buffer(256), 32);
 
-pub fn getArgsDirect(allocator: Mem.Allocator) ArgsBuffer {
+pub fn argsDirect(allocator: Mem.Allocator) ArgsBuffer {
     var args_buffer = ArgsBuffer.init(0);
 
     if (OS.is_windows) {
