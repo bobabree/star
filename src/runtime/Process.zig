@@ -9,10 +9,12 @@ const OS = @import("OS.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 
 pub const Child = process.Child;
+pub const execve = process.execve;
+pub const exit = process.exit;
 
 pub const ArgsBuffer = FixedBuffer(Utf8Buffer(256), 32);
 
-pub fn argsDirect(allocator: Mem.Allocator) ArgsBuffer {
+pub fn argsMaybeAlloc(allocator: Mem.Allocator) ArgsBuffer {
     var args_buffer = ArgsBuffer.init(0);
 
     if (OS.is_windows) {

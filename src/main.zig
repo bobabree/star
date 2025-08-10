@@ -23,7 +23,7 @@ pub fn main() !void {
     if (OS.is_ios) {
         Debug.ios.success("Hello World from Zig iOS!", .{});
     } else {
-        const args = Process.argsDirect(allocator);
+        const args = Process.argsMaybeAlloc(allocator);
         const is_dev = for (args.constSlice()) |arg| {
             if (Mem.eql(u8, arg.constSlice(), "--dev")) break true;
         } else false;

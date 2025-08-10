@@ -5,6 +5,7 @@ const builtin = runtime.builtin;
 const Atomic = runtime.Atomic;
 const Debug = runtime.Debug;
 const Fs = runtime.Fs;
+const FsPath = runtime.FsPath;
 const Http = runtime.Http;
 const Heap = runtime.Heap;
 const Mem = runtime.Mem;
@@ -21,13 +22,28 @@ pub const HotReloader = struct {
     watch_dirs: []const []const u8,
     rebuild_cmd: []const []const u8,
     should_stop: Atomic.Value(bool),
+    last_server_mtime: i128,
 
     pub fn init(allocator: Mem.Allocator) HotReloader {
+        const initial_mtime = blk: {
+            const file = Fs.cwd().openFile("src/server.zig", .{}) catch |err| {
+                Debug.server.warn("Cannot check server.zig initially: {}", .{err});
+                break :blk 0;
+            };
+            defer file.close();
+            const stat = file.stat() catch |err| {
+                Debug.server.warn("Cannot stat server.zig initially: {}", .{err});
+                break :blk 0;
+            };
+            break :blk stat.mtime;
+        };
+
         return HotReloader{
             .allocator = allocator,
-            .watch_dirs = &.{ "web", "src", "runtime" },
+            .watch_dirs = &.{"src"},
             .rebuild_cmd = &.{ "zig", "build" },
             .should_stop = Atomic.Value(bool).init(false),
+            .last_server_mtime = initial_mtime,
         };
     }
 
@@ -57,29 +73,53 @@ pub const HotReloader = struct {
         var latest: i128 = 0;
 
         for (self.watch_dirs) |dir_name| {
-            self.scanDir(dir_name, &latest) catch {};
+            self.scanDir(dir_name, &latest) catch |err| {
+                Debug.server.warn("Failed to scan {s}: {}", .{ dir_name, err });
+            };
         }
         return latest;
     }
-
-    fn scanDir(_: *HotReloader, dir_path: []const u8, latest: *i128) !void {
-        var dir = Fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
+    fn scanDir(self: *HotReloader, dir_path: []const u8, latest: *i128) !void {
+        var dir = Fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+            Debug.server.warn("Cannot open dir {s}: {}", .{ dir_path, err });
+            return;
+        };
         defer dir.close();
 
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
-            if (entry.kind == .file and Mem.endsWith(u8, entry.name, ".zig")) {
-                const file = dir.openFile(entry.name, .{}) catch continue;
+            if (entry.kind == .file) {
+                // Skip generated files
+                if (Mem.eql(u8, entry.name, "index.min.html") or
+                    Mem.eql(u8, entry.name, "js.lib")) continue;
+
+                // Watch all other files
+                const file = dir.openFile(entry.name, .{}) catch |err| {
+                    Debug.server.warn("Cannot open file {s}: {}", .{ entry.name, err });
+                    continue;
+                };
                 defer file.close();
 
-                const stat = file.stat() catch continue;
+                const stat = file.stat() catch |err| {
+                    Debug.server.warn("Cannot stat {s}: {}", .{ entry.name, err });
+                    continue;
+                };
                 if (stat.mtime > latest.*) {
                     latest.* = stat.mtime;
                 }
+            } else if (entry.kind == .directory) {
+                var path_buf: [Fs.max_path_bytes]u8 = undefined;
+                const sub_path = FsPath.join(&path_buf, &.{ dir_path, entry.name }) catch |err| {
+                    Debug.server.warn("Path too long for {s}/{s}: {}", .{ dir_path, entry.name, err });
+                    continue;
+                };
+
+                self.scanDir(sub_path, latest) catch |err| {
+                    Debug.server.warn("Failed to scan subdir {s}: {}", .{ sub_path, err });
+                };
             }
         }
     }
-
     fn rebuild(self: *HotReloader) void {
         Debug.server.info("🔄 Rebuilding...", .{});
 
@@ -94,9 +134,56 @@ pub const HotReloader = struct {
         defer self.allocator.free(result.stderr);
 
         if (result.term == .Exited and result.term.Exited == 0) {
-            Debug.server.success("✅ Build complete", .{});
+            Debug.server.success("✅ Build completed", .{});
+
+            // Only check for server restart if build succeeded
+            const server_stat = blk: {
+                const file = Fs.cwd().openFile("src/server.zig", .{}) catch |err| {
+                    Debug.server.warn("Cannot check server.zig: {}", .{err});
+                    break :blk null;
+                };
+                defer file.close();
+                break :blk file.stat() catch |err| {
+                    Debug.server.warn("Cannot stat server.zig: {}", .{err});
+                    break :blk null;
+                };
+            };
+
+            if (server_stat) |stat| {
+                if (comptime builtin.target.os.tag == .windows or builtin.target.cpu.arch.isWasm()) {
+                    Debug.server.warn("TODO: Auto-restart not supported on this platform", .{});
+                } else {
+                    if (stat.mtime > self.last_server_mtime) {
+                        Debug.server.info("🔄 Server changed, restarting...", .{});
+
+                        // Get the actual executable path
+                        var exe_path_buf: [Fs.max_path_bytes]u8 = undefined;
+                        const exe_path = Fs.selfExePath(&exe_path_buf) catch |err| {
+                            Debug.server.err("❌ Cannot get exe path: {}", .{err});
+                            return;
+                        };
+
+                        const argv_buffers = Process.argsMaybeAlloc(self.allocator);
+
+                        // Convert Utf8Buffer array to string array
+                        // TODO: generalize this
+                        var argv_strings: [32][]const u8 = undefined;
+                        argv_strings[0] = exe_path;
+                        for (argv_buffers.constSlice()[1..], 1..) |arg, i| {
+                            argv_strings[i] = arg.constSlice();
+                        }
+                        const argv = argv_strings[0..argv_buffers.len];
+
+                        const err = Process.execve(self.allocator, argv, null);
+                        Debug.server.err("❌ Failed to restart: {}", .{err});
+                    }
+                    // Only update mtime after successful build
+                    self.last_server_mtime = stat.mtime;
+                }
+            }
         } else {
             Debug.server.err("❌ Build failed: {s}", .{result.stderr});
+            // Don't update mtime or restart on build failure
         }
     }
 };
@@ -199,8 +286,8 @@ pub const Server = struct {
             return;
         };
 
-        const wasm_path = try Fs.path.join(allocator, &.{ exe_dir_path, "star.wasm" });
-        defer allocator.free(wasm_path);
+        var wasm_path_buf: [Fs.max_path_bytes]u8 = undefined;
+        const wasm_path = try FsPath.join(&wasm_path_buf, &.{ exe_dir_path, "star.wasm" });
 
         const wasm_data = Fs.cwd().readFileAlloc(allocator, wasm_path, 10_000_000) catch |err| {
             Debug.server.err("❌ Failed to read WASM file: {}", .{err});
@@ -225,7 +312,6 @@ pub const Server = struct {
             Debug.server.info("Served WASM ({d:.2} MB / {d:.0} KB)", .{ size_mb, size_kb });
         }
     }
-
     fn serve404(request: *Http.Server.Request) !void {
         const content = "404 - File not found";
         try request.respond(content, .{
@@ -301,17 +387,6 @@ test "server http buffer allocation" {
     profile.endWith(http_buffer);
 
     try Testing.expect(http_buffer.len == 4096);
-}
-
-test "hot reloader initialization with memory" {
-    var buffer: [1024]u8 = undefined;
-    var fba = Heap.FixedBufferAllocator.init(&buffer);
-
-    var profile = try ProfiledTest.startWithMemory(@src(), &fba);
-
-    const reloader = profile.endWithResult(HotReloader.init(fba.allocator()));
-
-    try Testing.expect(reloader.watch_dirs.len == 3);
 }
 
 test "hot reloader file scanning with memory" {

@@ -248,7 +248,7 @@ const Scope = enum(u8) {
         else
             "[" ++ @tagName(self) ++ "][" ++ @tagName(message_level) ++ "] ";
 
-        var buffer = Utf8Buffer(1024).init();
+        var buffer = Utf8Buffer(4096).init();
         const task = getCurrentTask();
         if (task == Thread.TaskType.default)
             buffer.format(prefix ++ format ++ "\n", args)

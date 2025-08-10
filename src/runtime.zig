@@ -7,6 +7,7 @@ pub const Debug = @import("runtime/Debug.zig");
 pub const FixedBuffer = @import("runtime/FixedBuffer.zig");
 pub const Fmt = @import("runtime/Fmt.zig");
 pub const Fs = @import("runtime/Fs.zig");
+pub const FsPath = @import("runtime/FsPath.zig");
 pub const Heap = @import("runtime/Heap.zig");
 pub const Http = @import("runtime/Http.zig");
 pub const IO = @import("runtime/IO.zig");
