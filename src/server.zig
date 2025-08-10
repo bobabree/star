@@ -10,6 +10,7 @@ const Http = runtime.Http;
 const Heap = runtime.Heap;
 const Mem = runtime.Mem;
 const Net = runtime.Net;
+const OS = runtime.OS;
 const Process = runtime.Process;
 const Thread = runtime.Thread;
 const Time = runtime.Time;
@@ -38,10 +39,16 @@ pub const HotReloader = struct {
             break :blk stat.mtime;
         };
 
+        // Determine rebuild command based on build mode
+        const rebuild_cmd = if (builtin.mode == .Debug)
+            &[_][]const u8{ "zig", "build" }
+        else
+            &[_][]const u8{ "zig", "build", "release" };
+
         return HotReloader{
             .allocator = allocator,
             .watch_dirs = &.{"src"},
-            .rebuild_cmd = &.{ "zig", "build" },
+            .rebuild_cmd = rebuild_cmd,
             .should_stop = Atomic.Value(bool).init(false),
             .last_server_mtime = initial_mtime,
         };
@@ -150,8 +157,30 @@ pub const HotReloader = struct {
             };
 
             if (server_stat) |stat| {
-                if (comptime builtin.target.os.tag == .windows or builtin.target.cpu.arch.isWasm()) {
-                    Debug.server.warn("TODO: Auto-restart not supported on this platform", .{});
+                if (comptime OS.is_windows) {
+                    Debug.server.warn("TODO: Auto-restart may not be supported on this platform", .{});
+
+                    // // Try Windows-style restart
+                    // var exe_path_buf: [Fs.max_path_bytes]u8 = undefined;
+                    // const exe_path = Fs.selfExePath(&exe_path_buf) catch |err| {
+                    //     Debug.server.err("❌ Cannot get exe path: {}", .{err});
+                    //     return;
+                    // };
+
+                    // const argv_buffers = Process.argsDirect(self.allocator);
+                    // var argv_strings: [32][]const u8 = undefined;
+                    // var argv = argsToStringArray(argv_buffers, &argv_strings);
+                    // argv[0] = exe_path;
+
+                    // // Spawn new process
+                    // var child = Process.Child.init(argv, self.allocator);
+                    // child.spawn() catch |err| {
+                    //     Debug.server.err("❌ Failed to spawn new process: {}", .{err});
+                    //     return;
+                    // };
+
+                    // // Exit current process
+                    // Process.exit(0);
                 } else {
                     if (stat.mtime > self.last_server_mtime) {
                         Debug.server.info("🔄 Server changed, restarting...", .{});
