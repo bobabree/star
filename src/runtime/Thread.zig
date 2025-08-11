@@ -39,7 +39,6 @@ fn wasmSpawn(config: SpawnConfig, comptime _: anytype, args: anytype) SpawnError
 }
 
 export fn invoke_thread_task(task_id: u32) void {
-    Debug.wasm.warn("invoke_thread_task called with task_id: {}", .{task_id});
     const type_info = @typeInfo(TaskType);
     inline for (type_info.@"enum".fields) |field| {
         if (task_id == field.value) {
@@ -52,6 +51,7 @@ export fn invoke_thread_task(task_id: u32) void {
     Debug.wasm.warn("Unknown task_id: {}", .{task_id});
 }
 
+// TODO is_wasm == Wasm.sleep
 pub const sleep = thread.sleep;
 
 pub const TaskType = enum(u32) {
@@ -70,13 +70,13 @@ pub const TaskType = enum(u32) {
 
     fn hotReloadLoop(comptime self: TaskType) void {
         _ = self;
-        //while (true) {
-        Debug.wasm.warn("Hot reloading!", .{});
-        checkWasmSize() catch |err| {
-            Debug.wasm.warn("Hot reload check failed: {}", .{err});
-            //continue;
-        };
-        //}
+
+        // Initial check
+        Wasm.fetch("/star.wasm", "HEAD", FETCH_WASM_SIZE);
+
+        // Sleep and continue
+        waiting = true;
+        Wasm.sleep(2000);
     }
 };
 
@@ -84,43 +84,30 @@ pub fn hotReloadTask() void {
     TaskType.hot_reload.execute();
 }
 
-fn checkWasmSize() !void {
-    // var client = std.http.Client{ .allocator = allocator };
-    // defer client.deinit();
+const FETCH_WASM_SIZE = 0;
+var waiting = true;
+export fn sleep_callback() void {
+    //Debug.wasm.warn("SLEEP CALLED.", .{});
 
-    // const uri = std.Uri.parse("http://127.0.0.1:8080/star.wasm") catch |err| {
-    //     runtime.Debug.wasm.err("Failed to parse URI: {}", .{err});
-    //     return err;
-    // };
+    waiting = false;
+    // Continue the loop
+    Wasm.fetch("/star.wasm", "HEAD", FETCH_WASM_SIZE);
 
-    // var request = client.request(.HEAD, uri, .{}, .{}) catch |err| {
-    //     runtime.Debug.wasm.err("Failed to create HTTP request: {}", .{err});
-    //     return err;
-    // };
-    // defer request.deinit();
+    // Schedule next check
+    Wasm.sleep(3000);
+}
 
-    // request.start() catch |err| {
-    //     runtime.Debug.wasm.err("Failed to start HTTP request: {}", .{err});
-    //     return err;
-    // };
+var last_wasm_size: u32 = 0;
+export fn fetch_callback(callback_id: u32, value: u32) void {
+    if (callback_id == FETCH_WASM_SIZE) {
+        //Debug.wasm.info("WASM size check: {}", .{value});
 
-    // request.wait() catch |err| {
-    //     runtime.Debug.wasm.err("HTTP request failed: {}", .{err});
-    //     return err;
-    // };
+        if (last_wasm_size != 0 and value != last_wasm_size) {
+            Debug.wasm.warn("🔄 WASM changed from {} to {} bytes", .{ last_wasm_size, value });
+            Wasm.reloadWasm();
+        }
 
-    // if (request.response.headers.getFirstValue("content-length")) |size_str| {
-    //     const size = std.fmt.parseInt(u32, size_str, 10) catch |err| {
-    //         runtime.Debug.wasm.warn("Failed to parse content-length '{}': {}", .{ size_str, err });
-    //         return;
-    //     };
-
-    //     if (last_wasm_size != 0 and size != last_wasm_size) {
-    //         runtime.Debug.wasm.info("🔄 WASM file changed, reloading...", .{});
-    //         reloadWasm();
-    //     }
-    //     last_wasm_size = size;
-    // } else {
-    //     runtime.Debug.wasm.warn("No content-length header in response", .{});
-    // }
+        // Always update last_wasm_size, not just on change
+        last_wasm_size = value;
+    }
 }

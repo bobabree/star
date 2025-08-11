@@ -32,7 +32,7 @@ const DomOp = enum(u32) {
     setId = 8,
     setTitle = 9,
     addHeadElement = 10,
-    reloadWasm = 11,
+    getElementById = 11,
 
     pub fn invoke(comptime self: DomOp, args: anytype) u32 {
         return switch (self) {
@@ -47,7 +47,7 @@ const DomOp = enum(u32) {
             .setId => dom_op(@intFromEnum(self), args.id, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
             .setTitle => dom_op(@intFromEnum(self), 0, args.title.ptr, @intCast(args.title.len), null, 0),
             .addHeadElement => dom_op(@intFromEnum(self), 0, args.content.ptr, @intCast(args.content.len), args.element_type.ptr, @intCast(args.element_type.len)),
-            .reloadWasm => dom_op(@intFromEnum(self), 0, null, 0, null, 0),
+            .getElementById => dom_op(@intFromEnum(self), 0, args.id.ptr, @intCast(args.id.len), null, 0),
         };
     }
 };
@@ -101,56 +101,6 @@ fn addJsLib(content: []const u8) void {
     _ = DomOp.addHeadElement.invoke(.{ .content = content, .element_type = "script" });
 }
 
-fn reloadWasm() void {
-    _ = DomOp.reloadWasm.invoke(.{});
-}
-
-const wasm_op = if (OS.is_wasm) struct {
-    extern fn wasm_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
-}.wasm_op else (struct {
-    fn f(_: u32, _: u32, _: ?[*]const u8, _: u32, _: ?[*]const u8, _: u32) u32 {
-        return 0;
-    }
-}).f;
-
-pub const WasmOp = enum(u32) {
-    log = 0,
-    warn = 1,
-    err = 2,
-    createThread = 3,
-    threadJoin = 4,
-    terminalInit = 5,
-    terminalWrite = 6,
-
-    pub fn invoke(comptime self: WasmOp, args: anytype) u32 {
-        return switch (self) {
-            .log => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .warn => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .err => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .createThread => wasm_op(@intFromEnum(self), args.task_id, null, 0, null, 0),
-            .threadJoin => wasm_op(@intFromEnum(self), args.thread_id, null, 0, null, 0),
-            .terminalInit => wasm_op(@intFromEnum(self), 0, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
-            .terminalWrite => wasm_op(@intFromEnum(self), 0, args.text.ptr, @intCast(args.text.len), null, 0),
-        };
-    }
-};
-
-pub fn createThread(task_id: u32) u32 {
-    return WasmOp.createThread.invoke(.{ .task_id = task_id });
-}
-
-pub fn threadJoin(thread_id: u32) void {
-    _ = WasmOp.threadJoin.invoke(.{ .thread_id = thread_id });
-}
-
-pub fn terminalInit(element_id: []const u8) void {
-    _ = WasmOp.terminalInit.invoke(.{ .element_id = element_id });
-}
-
-pub fn terminalWrite(text: []const u8) void {
-    _ = WasmOp.terminalWrite.invoke(.{ .text = text });
-}
-
 pub fn linkLibs(allocator: Allocator) !void {
     linkJsLib(allocator) catch |err| {
         Debug.wasm.err("Failed to link js.lib: {}", .{err});
@@ -172,6 +122,75 @@ fn linkJsLib(allocator: Allocator) !void {
 
     // Add the JavaScript
     _ = addJsLib(decompressed[0..out_stream.pos]);
+}
+
+pub fn getElementById(id: []const u8) ?u32 {
+    const index = DomOp.getElementById.invoke(.{ .id = id });
+    return if (index == 0) null else index;
+}
+
+const wasm_op = if (OS.is_wasm) struct {
+    extern fn wasm_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
+}.wasm_op else (struct {
+    fn f(_: u32, _: u32, _: ?[*]const u8, _: u32, _: ?[*]const u8, _: u32) u32 {
+        return 0;
+    }
+}).f;
+
+pub const WasmOp = enum(u32) {
+    log = 0,
+    warn = 1,
+    err = 2,
+    createThread = 3,
+    threadJoin = 4,
+    terminalInit = 5,
+    terminalWrite = 6,
+    fetch = 7,
+    sleep = 8,
+    reloadWasm = 9,
+
+    pub fn invoke(comptime self: WasmOp, args: anytype) u32 {
+        return switch (self) {
+            .log => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
+            .warn => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
+            .err => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
+            .createThread => wasm_op(@intFromEnum(self), args.task_id, null, 0, null, 0),
+            .threadJoin => wasm_op(@intFromEnum(self), args.thread_id, null, 0, null, 0),
+            .terminalInit => wasm_op(@intFromEnum(self), 0, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
+            .terminalWrite => wasm_op(@intFromEnum(self), 0, args.text.ptr, @intCast(args.text.len), null, 0),
+            .fetch => wasm_op(@intFromEnum(self), args.callback_id, args.url.ptr, @intCast(args.url.len), args.method.ptr, @intCast(args.method.len)),
+            .sleep => wasm_op(@intFromEnum(self), args.ms, null, 0, null, 0),
+            .reloadWasm => wasm_op(@intFromEnum(self), 0, null, 0, null, 0),
+        };
+    }
+};
+
+pub fn createThread(task_id: u32) u32 {
+    return WasmOp.createThread.invoke(.{ .task_id = task_id });
+}
+
+pub fn threadJoin(thread_id: u32) void {
+    _ = WasmOp.threadJoin.invoke(.{ .thread_id = thread_id });
+}
+
+pub fn terminalInit(element_id: []const u8) void {
+    _ = WasmOp.terminalInit.invoke(.{ .element_id = element_id });
+}
+
+pub fn terminalWrite(text: []const u8) void {
+    _ = WasmOp.terminalWrite.invoke(.{ .text = text });
+}
+
+pub fn fetch(url: []const u8, method: []const u8, callback_id: u32) void {
+    _ = WasmOp.fetch.invoke(.{ .url = url, .method = method, .callback_id = callback_id });
+}
+
+pub fn sleep(ms: u32) void {
+    _ = WasmOp.sleep.invoke(.{ .ms = ms });
+}
+
+pub fn reloadWasm() void {
+    _ = WasmOp.reloadWasm.invoke(.{});
 }
 
 pub const Element = struct {
@@ -302,26 +321,24 @@ fn runTests() void {
     }
 }
 
-// Build the UI
 pub fn buildUI() void {
-    document.title("Star Demo");
+    // Uncomment this if we want HotReloadig for all other UI elems in the future
+    // _ = document.body().innerHTML("");
 
-    //document.addCSS("body{background:#000}");
-
-    // Store terminal element
-    terminalElement = div().elementId("terminal");
-
-    // Build UI structure
-    _ = document.body().add(div().className("container").children(&.{
-        terminalElement,
-    }));
+    // Check if terminal container already exists
+    const terminalExists = getElementById("terminal") != null;
+    if (!terminalExists) {
+        terminalElement = div().elementId("terminal");
+        _ = document.body().add(div().className("container").children(&.{
+            terminalElement,
+        }));
+    }
 
     terminalInit("terminal");
 
-    // Fish-style greeting
-    terminalWrite("Welcome to \x1b[1;36mStarOS\x1b[0m\r\n");
+    terminalWrite("\x1b[2J\x1b[H");
+    terminalWrite("Welcome to \x1b[1;36mStarOS!\x1b[0m\r\n");
     terminalWrite("Type \x1b[1;32mhelp\x1b[0m for instructions on how to use StarOS\r\n");
-    // Fish-style prompt
     terminalWrite("\x1b[1;32mroot\x1b[0m@\x1b[1;36mStarOS\x1b[0m \x1b[1;32m~\x1b[0m> ");
 }
 

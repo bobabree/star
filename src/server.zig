@@ -96,9 +96,10 @@ pub const HotReloader = struct {
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind == .file) {
-                // Skip generated files
-                if (Mem.eql(u8, entry.name, "index.min.html") or
-                    Mem.eql(u8, entry.name, "js.lib")) continue;
+                // TODO: For now, only watch .zig/.c/.cpp files
+                if (!Mem.endsWith(u8, entry.name, ".zig") and
+                    !Mem.endsWith(u8, entry.name, ".cpp") and
+                    !Mem.endsWith(u8, entry.name, ".c")) continue;
 
                 // Watch all other files
                 const file = dir.openFile(entry.name, .{}) catch |err| {
@@ -130,20 +131,17 @@ pub const HotReloader = struct {
     fn rebuild(self: *HotReloader) void {
         Debug.server.info("🔄 Rebuilding...", .{});
 
-        const result = Process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = self.rebuild_cmd,
-        }) catch {
-            Debug.server.err("❌ Build failed", .{});
+        var child = Process.Child.init(self.rebuild_cmd, self.allocator);
+
+        const term = child.spawnAndWait() catch |err| {
+            Debug.server.err("❌ Build failed: {}", .{err});
             return;
         };
-        defer self.allocator.free(result.stdout);
-        defer self.allocator.free(result.stderr);
 
-        if (result.term == .Exited and result.term.Exited == 0) {
+        if (term == .Exited and term.Exited == 0) {
             Debug.server.success("✅ Build completed", .{});
 
-            // Only check for server restart if build succeeded
+            // Check for server restart on all platforms
             const server_stat = blk: {
                 const file = Fs.cwd().openFile("src/server.zig", .{}) catch |err| {
                     Debug.server.warn("Cannot check server.zig: {}", .{err});
@@ -157,62 +155,17 @@ pub const HotReloader = struct {
             };
 
             if (server_stat) |stat| {
-                if (comptime OS.is_windows) {
-                    Debug.server.warn("TODO: Auto-restart may not be supported on this platform", .{});
+                if (stat.mtime > self.last_server_mtime) {
+                    Debug.server.info("🔄 Server changed, restarting...", .{});
 
-                    // // Try Windows-style restart
-                    // var exe_path_buf: [Fs.max_path_bytes]u8 = undefined;
-                    // const exe_path = Fs.selfExePath(&exe_path_buf) catch |err| {
-                    //     Debug.server.err("❌ Cannot get exe path: {}", .{err});
-                    //     return;
-                    // };
-
-                    // const argv_buffers = Process.argsDirect(self.allocator);
-                    // var argv_strings: [32][]const u8 = undefined;
-                    // var argv = argsToStringArray(argv_buffers, &argv_strings);
-                    // argv[0] = exe_path;
-
-                    // // Spawn new process
-                    // var child = Process.Child.init(argv, self.allocator);
-                    // child.spawn() catch |err| {
-                    //     Debug.server.err("❌ Failed to spawn new process: {}", .{err});
-                    //     return;
-                    // };
-
-                    // // Exit current process
-                    // Process.exit(0);
-                } else {
-                    if (stat.mtime > self.last_server_mtime) {
-                        Debug.server.info("🔄 Server changed, restarting...", .{});
-
-                        // Get the actual executable path
-                        var exe_path_buf: [Fs.max_path_bytes]u8 = undefined;
-                        const exe_path = Fs.selfExePath(&exe_path_buf) catch |err| {
-                            Debug.server.err("❌ Cannot get exe path: {}", .{err});
-                            return;
-                        };
-
-                        const argv_buffers = Process.argsMaybeAlloc(self.allocator);
-
-                        // Convert Utf8Buffer array to string array
-                        // TODO: generalize this
-                        var argv_strings: [32][]const u8 = undefined;
-                        argv_strings[0] = exe_path;
-                        for (argv_buffers.constSlice()[1..], 1..) |arg, i| {
-                            argv_strings[i] = arg.constSlice();
-                        }
-                        const argv = argv_strings[0..argv_buffers.len];
-
-                        const err = Process.execve(self.allocator, argv, null);
+                    Process.restartSelf(self.allocator) catch |err| {
                         Debug.server.err("❌ Failed to restart: {}", .{err});
-                    }
-                    // Only update mtime after successful build
-                    self.last_server_mtime = stat.mtime;
+                    };
                 }
+                self.last_server_mtime = stat.mtime;
             }
         } else {
-            Debug.server.err("❌ Build failed: {s}", .{result.stderr});
-            // Don't update mtime or restart on build failure
+            Debug.server.err("❌ Build failed with exit code: {}", .{term.Exited});
         }
     }
 };

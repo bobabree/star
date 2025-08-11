@@ -22,16 +22,10 @@ export fn _start() void {
         Debug.wasm.err("Failed to link libs: {}", .{err});
     };
 
-    // Build the UI
     Wasm.buildUI();
 
-    const greeting = "UI built successfully!";
-    Debug.wasm.debug(greeting, .{});
-    Debug.wasm.info(greeting, .{});
-    Debug.wasm.warn(greeting, .{});
-    Debug.wasm.success(greeting, .{});
-
     if (runtime.builtin.mode == .Debug) {
+        // TODO: consider HR on release modes
         startHotReload();
     }
 

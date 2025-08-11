@@ -2,7 +2,7 @@
 <html>
     <head>
         <meta charset="UTF-8">
-        <title>Loading...</title>
+        <title>Star Demo</title>
         <link rel="icon" href="data:,">
         <style>
             body{background:#000}
@@ -12,13 +12,14 @@
         <js.lib />
         <wasm.lib />
         <script>
+            let threads = [];
+            let elements = [null, document.body];  // Preserve DOM
+            
             async function loadWasm() {
                 const isWorker = typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
                 let wasmExports;
-                let threads = [];
                 let wasmModule;
-                let elements = isWorker ? [] : [null, document.body];
-                
+
                 const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
 
                 const dom_op = isWorker ? () => 0 : (op, id, ptr1, len1, ptr2, len2) => {
@@ -81,11 +82,15 @@
                             newHeadElement.textContent = s1;  
                             document.head.appendChild(newHeadElement);
                             return 0;
-                            
-                        case 11: // reloadWasm
-                            loadWasm();
-                            return 0;
-
+                        case 11: // getElementById
+                            const elementId = s1;
+                            const element = document.getElementById(elementId);
+                            if (element) {
+                                // Add to elements array and return index
+                                elements.push(element);
+                                return elements.length - 1;
+                            }
+                            return 0;  // Not found       
                         default:
                             return 0;
                     }
@@ -109,17 +114,30 @@
                             return 0;
                             
                         case 3: // createThread
+                            // Terminate old thread 
+                            if (threads[id]) {
+                                threads[id].terminate();
+                            }
+                            
+                            // Then create new thread
                             const threadCode = `(${loadWasm.toString()})()`;
                             const thread = new Worker(URL.createObjectURL(
                                 new Blob([threadCode], { type: 'application/javascript' })
                             ));
-                            const threadId = threads.length;
                             
-                            thread.postMessage({ type: 'init', module: wasmModule, threadId: threadId });
+                            thread.onmessage = (e) => {
+                                if (e.data.type === 'reload-wasm') {
+                                    loadWasm();
+                                }
+                            };
+                            
+                            threads[id] = thread;
+                            
+                            thread.postMessage({ type: 'init', module: wasmModule, threadId: id });
                             thread.postMessage({ type: 'run', task_id: id });
                             
-                            threads.push(thread);
-                            return threadId;
+                            return id;
+
                             
                         case 4: // threadJoin
                             if (threads[id]) {
@@ -129,6 +147,10 @@
                         
                         case 5: // terminalInit
                             if (!isWorker) {
+                                // Dispose old terminal if exists
+                                if (window.term) {
+                                    window.term.dispose();
+                                }
                                 window.term = new Terminal({
                                     cols: Math.floor(window.innerWidth / 9.2),
                                 });
@@ -147,6 +169,41 @@
                                 if (window.term) window.term.write(s1);
                             }
                             return 0;
+                            
+                        case 7: // fetch
+                            const url = s1;
+                            const method = s2;
+                            const baseUrl = location.origin === 'null' ? '' : location.origin;
+                            const fetchUrl = baseUrl + '/star.wasm?check=' + Date.now();
+                            fetch(fetchUrl, { method: method })
+                                .then(r => {
+                                    const contentLength = r.headers.get('content-length');
+                                    const size = contentLength ? parseInt(contentLength) : 0;
+                                    wasmExports.fetch_callback(id, size);
+                                })
+                                .catch(err => {
+                                    // TODO: for now, ignore errors in standalone mode
+                                    if (location.protocol !== 'file:') {
+                                        console.error('Fetch error:', err);
+                                    }
+                                    wasmExports.fetch_callback(id, 0);
+                                });
+                        return 0;
+
+                        case 8: // sleep
+                            // TODO: consider Atomics.wait without SAB
+                            //       for now, just use setTimeout in worker
+                            setTimeout(() => wasmExports.sleep_callback(), id);
+                            return 0;
+
+                        case 9: // reloadWasm
+                            if (isWorker) {
+                                postMessage({type: 'reload-wasm'}); 
+                            } else {
+                                loadWasm();
+                            }
+                            return 0;
+
                         default:
                             return 0;
                     }
@@ -165,7 +222,8 @@
                             wasmModule = e.data.module;
                             const wasmInstance = await WebAssembly.instantiate(wasmModule, importObject);
                             wasmExports = wasmInstance.exports;
-                        } else if (e.data.type === 'run') {
+                        } 
+                        else if (e.data.type === 'run') {
                             if (wasmExports) {
                                 wasmExports.invoke_thread_task(e.data.task_id);
                             }
@@ -187,11 +245,9 @@
                     })
                     .then(instance => {
                         wasmExports = instance.exports;
-                        elements = [null, document.body];
-                        threads = [];
                         
                         if (wasmExports._start) {
-                            console.log('wasmExports: ', wasmExports);
+                            //console.log('wasmExports: ', wasmExports);
                             wasmExports._start();
                         }
                     })
