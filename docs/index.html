@@ -193,9 +193,7 @@
                                     wasmExports.fetch_callback(id, value);
                                 })
                                 .catch(err => {
-                                    if (location.protocol !== 'file:') {
-                                        console.error('Fetch error:', err);
-                                    }
+                                    console.error('Fetch error:', err);
                                     wasmExports.fetch_callback(id, 0);
                                 });
                             return 0;
@@ -257,7 +255,7 @@
                         wasmExports = instance.exports;
                         
                         if (wasmExports._start) {
-                            wasmExports.configure(location.protocol !== 'file:');
+                            wasmExports.configure(location.hostname === 'localhost' || location.hostname === '127.0.0.1');
                             //console.log('wasmExports: ', wasmExports);
                             wasmExports._start();
                         }
