@@ -28,18 +28,21 @@ pub const HotReloader = struct {
     file_hashes: @import("std").StringHashMap(u64),
 
     pub fn init(allocator: Mem.Allocator) HotReloader {
-        const initial_mtime = blk: {
-            const file = Fs.cwd().openFile("src/server.zig", .{}) catch |err| {
-                Debug.server.warn("Cannot check server.zig initially: {}", .{err});
-                break :blk 0;
-            };
-            defer file.close();
-            const stat = file.stat() catch |err| {
-                Debug.server.warn("Cannot stat server.zig initially: {}", .{err});
-                break :blk 0;
-            };
-            break :blk stat.mtime;
+        const files_requiring_restart = [_][]const u8{
+            "src/server.zig",
+            "src/web/index.html",
+            "src/web/js.o",
         };
+
+        var initial_mtime: i128 = 0;
+        for (files_requiring_restart) |path| {
+            const file = Fs.cwd().openFile(path, .{}) catch continue;
+            defer file.close();
+            const stat = file.stat() catch continue;
+            if (stat.mtime > initial_mtime) {
+                initial_mtime = stat.mtime;
+            }
+        }
 
         // Determine rebuild command based on build mode
         const rebuild_cmd = if (builtin.mode == .Debug)
@@ -104,10 +107,16 @@ pub const HotReloader = struct {
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind == .file) {
-                // TODO: For now, only watch .zig/.c/.cpp files
+                // Skip generated files first
+                if (Mem.endsWith(u8, entry.name, ".lib") or
+                    Mem.endsWith(u8, entry.name, ".min.html")) continue;
+
+                // Then check extensions
                 if (!Mem.endsWith(u8, entry.name, ".zig") and
                     !Mem.endsWith(u8, entry.name, ".cpp") and
-                    !Mem.endsWith(u8, entry.name, ".c")) continue;
+                    !Mem.endsWith(u8, entry.name, ".c") and
+                    !Mem.endsWith(u8, entry.name, ".html") and
+                    !Mem.endsWith(u8, entry.name, ".o")) continue;
 
                 const file = dir.openFile(entry.name, .{}) catch |err| {
                     Debug.server.warn("Cannot open file {s}: {}", .{ entry.name, err });
@@ -172,28 +181,32 @@ pub const HotReloader = struct {
         if (term == .Exited and term.Exited == 0) {
             Debug.server.success("✅ Build completed", .{});
 
-            // Check for server restart on all platforms
-            const server_stat = blk: {
-                const file = Fs.cwd().openFile("src/server.zig", .{}) catch |err| {
-                    Debug.server.warn("Cannot check server.zig: {}", .{err});
-                    break :blk null;
-                };
-                defer file.close();
-                break :blk file.stat() catch |err| {
-                    Debug.server.warn("Cannot stat server.zig: {}", .{err});
-                    break :blk null;
-                };
+            // Check if any file requiring restart was modified
+            const files_requiring_restart = [_][]const u8{
+                "src/server.zig",
+                "src/web/index.html",
+                "src/web/js.o",
             };
 
-            if (server_stat) |stat| {
-                if (stat.mtime > self.last_server_mtime) {
-                    Debug.server.info("🔄 Server changed, restarting...", .{});
+            var needs_restart = false;
+            for (files_requiring_restart) |path| {
+                const file = Fs.cwd().openFile(path, .{}) catch continue;
+                defer file.close();
+                const stat = file.stat() catch continue;
 
-                    Process.restartSelf(self.allocator) catch |err| {
-                        Debug.server.err("❌ Failed to restart: {}", .{err});
-                    };
+                if (stat.mtime > self.last_server_mtime) {
+                    Debug.server.info("📝 {s} changed", .{path});
+                    needs_restart = true;
+                    break;
                 }
-                self.last_server_mtime = stat.mtime;
+            }
+
+            if (needs_restart) {
+                Debug.server.info("🔄 Restarting server...", .{});
+                Process.restartSelf(self.allocator) catch |err| {
+                    Debug.server.err("❌ Failed to restart: {}", .{err});
+                };
+                self.last_server_mtime = Time.timestamp(); // Update to current time
             }
         } else {
             Debug.server.err("❌ Build failed with exit code: {}", .{term.Exited});
