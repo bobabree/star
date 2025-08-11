@@ -190,7 +190,7 @@ const PlatformType = enum {
     pub fn createServerArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
         const exe_module = options.b.createModule(self.createModuleOptions(
             options.b,
-            options.b.path("src/main.zig"),
+            options.b.path("src/app.zig"),
             options.optimize,
         ));
         exe_module.addImport("runtime", runtime_module);
@@ -207,7 +207,7 @@ const PlatformType = enum {
         const wasm_target = PlatformType.wasm;
         const wasm_module = options.b.createModule(wasm_target.createModuleOptions(
             options.b,
-            options.b.path("src/wasm.zig"),
+            options.b.path("src/app.zig"),
             options.optimize,
         ));
         wasm_module.addImport("runtime", runtime_module);

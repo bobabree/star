@@ -25,7 +25,7 @@ pub const Unicode = @import("runtime/Unicode.zig");
 pub const Utf8Buffer = @import("runtime/Utf8Buffer.zig");
 pub const Wasm = @import("runtime/Wasm.zig");
 
-pub const wasm = @import("wasm.zig");
+pub const app = @import("app.zig");
 pub const server = @import("server.zig");
 
 // Tests

@@ -19,6 +19,19 @@ const Time = runtime.Time;
 // Embed HTML
 const html_content = @embedFile("web/index.min.html");
 
+pub fn run() !void {
+    // Server gets its own allocator
+    var buffer: [1024 * 1024]u8 = undefined;
+    var fba = Heap.FixedBufferAllocator.init(&buffer);
+    const allocator = fba.allocator();
+
+    var server = Server.init(allocator, true);
+
+    // Run server in background thread
+    const server_thread = try Thread.spawn(.{}, Server.run, .{&server});
+    server_thread.detach();
+}
+
 pub const HotReloader = struct {
     allocator: Mem.Allocator,
     watch_dirs: []const []const u8,
