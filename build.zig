@@ -374,6 +374,11 @@ const PlatformType = enum {
 
     fn optimizeWasm(comptime self: PlatformType, options: BuildOptions, wasm_install: *std.Build.Step) *std.Build.Step {
         _ = self;
+        // Skip in debug mode
+        if (options.optimize == .Debug) {
+            return wasm_install;
+        }
+
         const cmd = options.b.addSystemCommand(&.{
             "wasm-opt",
             options.b.getInstallPath(.{ .custom = options.folder_name }, "star.wasm"),
@@ -543,7 +548,13 @@ fn prepareHtml(b: *std.Build, wasm_path: []const u8, output_path: []const u8, em
         final = replaceString(b.allocator, final, "<wasm.lib />", "") orelse return;
     }
 
-    //Minify
+    // Skip minification in debug
+    if (builtin.mode == .Debug) {
+        writeFile(output_path, final);
+        return;
+    }
+
+    // Minify
     const minified = pipeThrough(b.allocator, &.{
         "html-minifier-terser",
         "--collapse-whitespace",

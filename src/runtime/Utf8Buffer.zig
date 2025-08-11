@@ -29,7 +29,7 @@ pub fn Utf8Buffer(comptime capacity: usize) type {
             Debug.assert(self._buffer.len <= capacity);
 
             var temp_buf: [capacity]u8 = undefined;
-            const formatted = Fmt.bufPrintZ(&temp_buf, fmt, args) catch |err| {
+            const formatted = Fmt.bufPrint(&temp_buf, fmt, args) catch |err| {
                 Debug.panic("format failed with error {}: formatted string exceeds capacity {}", .{ err, capacity });
             };
 

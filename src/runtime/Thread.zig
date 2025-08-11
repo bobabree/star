@@ -84,13 +84,6 @@ pub fn hotReloadTask() void {
     TaskType.hot_reload.execute();
 }
 
-// TODO:
-// 1. Hot reload in release mode
-// 2. CheckFileSize not reliable if change too small
-// 3. There seems to be unncessary building/serve spams
-// 4. Building in debug mode should skip minify/wasm-opt
-// 5. index.html/js hot reloading
-
 const FETCH_WASM_SIZE = 0;
 var waiting = true;
 export fn sleep_callback() void {

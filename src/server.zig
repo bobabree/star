@@ -4,6 +4,7 @@ const runtime = @import("runtime.zig");
 const builtin = runtime.builtin;
 const Atomic = runtime.Atomic;
 const Debug = runtime.Debug;
+const Fmt = runtime.Fmt;
 const Fs = runtime.Fs;
 const FsPath = runtime.FsPath;
 const Http = runtime.Http;
@@ -24,6 +25,7 @@ pub const HotReloader = struct {
     rebuild_cmd: []const []const u8,
     should_stop: Atomic.Value(bool),
     last_server_mtime: i128,
+    file_hashes: @import("std").StringHashMap(u64),
 
     pub fn init(allocator: Mem.Allocator) HotReloader {
         const initial_mtime = blk: {
@@ -51,6 +53,7 @@ pub const HotReloader = struct {
             .rebuild_cmd = rebuild_cmd,
             .should_stop = Atomic.Value(bool).init(false),
             .last_server_mtime = initial_mtime,
+            .file_hashes = @import("std").StringHashMap(u64).init(allocator),
         };
     }
 
@@ -62,31 +65,36 @@ pub const HotReloader = struct {
     pub fn stop(self: *HotReloader) void {
         self.should_stop.store(true, .release);
     }
-
     fn watchLoop(self: *HotReloader) void {
-        var last_mtime: i128 = 0;
-
         while (!self.should_stop.load(.acquire)) {
-            const current_mtime = self.getLatestMtime();
-            if (current_mtime > last_mtime) {
-                self.rebuild();
-                last_mtime = current_mtime;
+            var changed = false;
+            for (self.watch_dirs) |dir_name| {
+                self.scanDir(dir_name, &changed) catch |err| {
+                    Debug.server.warn("Failed to scan {s}: {}", .{ dir_name, err });
+                };
             }
-            Thread.sleep(Time.ns_per_s / 4);
+
+            if (changed) {
+                self.rebuild();
+            }
+
+            Thread.sleep(Time.ns_per_s / 2);
         }
     }
 
-    fn getLatestMtime(self: *HotReloader) i128 {
-        var latest: i128 = 0;
+    fn hasChanges(self: *HotReloader) bool {
+        var changed = false;
 
         for (self.watch_dirs) |dir_name| {
-            self.scanDir(dir_name, &latest) catch |err| {
+            self.scanDir(dir_name, &changed) catch |err| {
                 Debug.server.warn("Failed to scan {s}: {}", .{ dir_name, err });
             };
         }
-        return latest;
+
+        return changed;
     }
-    fn scanDir(self: *HotReloader, dir_path: []const u8, latest: *i128) !void {
+
+    fn scanDir(self: *HotReloader, dir_path: []const u8, changed: *bool) !void {
         var dir = Fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
             Debug.server.warn("Cannot open dir {s}: {}", .{ dir_path, err });
             return;
@@ -101,19 +109,41 @@ pub const HotReloader = struct {
                     !Mem.endsWith(u8, entry.name, ".cpp") and
                     !Mem.endsWith(u8, entry.name, ".c")) continue;
 
-                // Watch all other files
                 const file = dir.openFile(entry.name, .{}) catch |err| {
                     Debug.server.warn("Cannot open file {s}: {}", .{ entry.name, err });
                     continue;
                 };
                 defer file.close();
 
-                const stat = file.stat() catch |err| {
-                    Debug.server.warn("Cannot stat {s}: {}", .{ entry.name, err });
+                // Read and hash content
+                const content = file.readToEndAlloc(self.allocator, 10_000_000) catch |err| {
+                    Debug.server.warn("Cannot read {s}: {}", .{ entry.name, err });
                     continue;
                 };
-                if (stat.mtime > latest.*) {
-                    latest.* = stat.mtime;
+                defer self.allocator.free(content);
+
+                const hash = @import("std").hash.Wyhash.hash(0, content);
+
+                // Build full path for hash map key
+                var path_buf: [Fs.max_path_bytes]u8 = undefined;
+                const full_path = Fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch |err| {
+                    Debug.server.warn("Path format failed {s}/{s}: {}", .{ dir_path, entry.name, err });
+                    continue;
+                };
+
+                // Check if hash changed
+                if (self.file_hashes.get(full_path)) |old_hash| {
+                    if (old_hash != hash) {
+                        Debug.server.info("📝 Content changed: {s}", .{full_path});
+                        const key = self.allocator.dupe(u8, full_path) catch continue;
+                        self.file_hashes.put(key, hash) catch continue;
+                        changed.* = true;
+                    }
+                } else {
+                    // New file or first scan
+                    const key = self.allocator.dupe(u8, full_path) catch continue;
+                    self.file_hashes.put(key, hash) catch continue;
+                    changed.* = true;
                 }
             } else if (entry.kind == .directory) {
                 var path_buf: [Fs.max_path_bytes]u8 = undefined;
@@ -122,12 +152,13 @@ pub const HotReloader = struct {
                     continue;
                 };
 
-                self.scanDir(sub_path, latest) catch |err| {
+                self.scanDir(sub_path, changed) catch |err| {
                     Debug.server.warn("Failed to scan subdir {s}: {}", .{ sub_path, err });
                 };
             }
         }
     }
+
     fn rebuild(self: *HotReloader) void {
         Debug.server.info("🔄 Rebuilding...", .{});
 
