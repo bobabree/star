@@ -13,6 +13,11 @@ var buffer: [1024 * 1024]u8 = undefined;
 var fba: FixedBufferAllocator = undefined;
 var allocator: Allocator = undefined;
 
+var enable_hot_reload: bool = false;
+export fn configure(hot_reload: bool) void {
+    enable_hot_reload = hot_reload;
+}
+
 export fn _start() void {
     fba = FixedBufferAllocator.init(&buffer);
     allocator = fba.allocator();
@@ -24,8 +29,7 @@ export fn _start() void {
 
     Wasm.buildUI();
 
-    if (runtime.builtin.mode == .Debug) {
-        // TODO: consider HR on release modes
+    if (enable_hot_reload) {
         startHotReload();
     }
 

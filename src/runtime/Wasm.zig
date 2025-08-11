@@ -337,7 +337,8 @@ pub fn buildUI() void {
     terminalInit("terminal");
 
     terminalWrite("\x1b[2J\x1b[H");
-    terminalWrite("Welcome to \x1b[1;36mStarOS!\x1b[0m\r\n");
+    terminalWrite("Welcome to \x1b[1;36mStarOS\x1b[0m\r\n");
+
     terminalWrite("Type \x1b[1;32mhelp\x1b[0m for instructions on how to use StarOS\r\n");
     terminalWrite("\x1b[1;32mroot\x1b[0m@\x1b[1;36mStarOS\x1b[0m \x1b[1;32m~\x1b[0m> ");
 }

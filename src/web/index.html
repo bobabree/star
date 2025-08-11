@@ -173,22 +173,32 @@
                         case 7: // fetch
                             const url = s1;
                             const method = s2;
-                            const baseUrl = location.origin === 'null' ? '' : location.origin;
-                            const fetchUrl = baseUrl + '/star.wasm?check=' + Date.now();
+                            const fetchUrl = location.origin + '/star.wasm?check=' + Date.now();
                             fetch(fetchUrl, { method: method })
                                 .then(r => {
                                     const contentLength = r.headers.get('content-length');
+                                    const lastModified = r.headers.get('last-modified');
                                     const size = contentLength ? parseInt(contentLength) : 0;
-                                    wasmExports.fetch_callback(id, size);
+                                    
+                                    let hash = 0;
+                                    if (lastModified) {
+                                        for (let i = 0; i < lastModified.length; i++) {
+                                            hash = ((hash << 5) - hash) + lastModified.charCodeAt(i);
+                                            hash = hash >>> 0; 
+                                        }
+                                    }
+                                    
+                                    // Combine size and hash with XOR
+                                    const value = (size ^ hash) >>> 0;
+                                    wasmExports.fetch_callback(id, value);
                                 })
                                 .catch(err => {
-                                    // TODO: for now, ignore errors in standalone mode
                                     if (location.protocol !== 'file:') {
                                         console.error('Fetch error:', err);
                                     }
                                     wasmExports.fetch_callback(id, 0);
                                 });
-                        return 0;
+                            return 0;
 
                         case 8: // sleep
                             // TODO: consider Atomics.wait without SAB
@@ -247,6 +257,7 @@
                         wasmExports = instance.exports;
                         
                         if (wasmExports._start) {
+                            wasmExports.configure(location.protocol !== 'file:');
                             //console.log('wasmExports: ', wasmExports);
                             wasmExports._start();
                         }

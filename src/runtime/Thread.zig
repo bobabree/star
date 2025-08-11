@@ -84,6 +84,13 @@ pub fn hotReloadTask() void {
     TaskType.hot_reload.execute();
 }
 
+// TODO:
+// 1. Hot reload in release mode
+// 2. CheckFileSize not reliable if change too small
+// 3. There seems to be unncessary building/serve spams
+// 4. Building in debug mode should skip minify/wasm-opt
+// 5. index.html/js hot reloading
+
 const FETCH_WASM_SIZE = 0;
 var waiting = true;
 export fn sleep_callback() void {
@@ -94,20 +101,26 @@ export fn sleep_callback() void {
     Wasm.fetch("/star.wasm", "HEAD", FETCH_WASM_SIZE);
 
     // Schedule next check
-    Wasm.sleep(3000);
+    Wasm.sleep(1000);
 }
 
-var last_wasm_size: u32 = 0;
+var last_wasm_hash: u32 = 0;
+var reload_counter: u32 = 0;
 export fn fetch_callback(callback_id: u32, value: u32) void {
     if (callback_id == FETCH_WASM_SIZE) {
-        //Debug.wasm.info("WASM size check: {}", .{value});
+        reload_counter += 1;
 
-        if (last_wasm_size != 0 and value != last_wasm_size) {
-            Debug.wasm.warn("🔄 WASM changed from {} to {} bytes", .{ last_wasm_size, value });
-            Wasm.reloadWasm();
+        if (last_wasm_hash != 0 and value != last_wasm_hash) {
+            // File changed! But wait - builds write files in stages (truncate -> write -> flush).
+            // Reloading mid-write = corrupted WASM. After 3+ checks, file is definitely stable.
+            if (reload_counter > 3) {
+                Debug.wasm.info("🔄 WASM changed (hash: {} -> {})", .{ last_wasm_hash, value });
+                Wasm.reloadWasm();
+                reload_counter = 0; // Reset to enforce minimum time between reloads
+            }
         }
 
-        // Always update last_wasm_size, not just on change
-        last_wasm_size = value;
+        // Track latest hash even during debounce
+        last_wasm_hash = value;
     }
 }
