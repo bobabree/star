@@ -8,11 +8,11 @@ const Mem = runtime.Mem;
 const OS = runtime.OS;
 const Process = runtime.Process;
 const Server = runtime.server.Server;
-const Terminal = runtime.Terminal;
 const Thread = runtime.Thread;
 const Time = runtime.Time;
 const Wasm = runtime.Wasm;
 const builtin = runtime.builtin;
+const terminal = runtime.Terminal.terminal;
 
 var buffer: [1 * 1024 * 1024]u8 = undefined;
 var fba: Heap.FixedBufferAllocator = undefined;
@@ -26,19 +26,6 @@ const App = enum {
     macos,
     linux,
     windows,
-
-    pub inline fn current() App {
-        return comptime if (OS.is_wasm)
-            .wasm
-        else if (OS.is_ios)
-            .ios
-        else switch (builtin.target.os.tag) {
-            .macos => .macos,
-            .linux => .linux,
-            .windows => .windows,
-            else => @compileError("Unsupported platform"),
-        };
-    }
 
     pub fn init(comptime self: App) void {
         // Initialize allocator
@@ -59,7 +46,6 @@ const App = enum {
                 };
 
                 Wasm.buildUI();
-                Terminal.init();
 
                 // Start hot reload if configured
                 if (enable_hot_reload) {
@@ -68,12 +54,11 @@ const App = enum {
             },
             .ios => {
                 Debug.ios.success("Hello World from Zig iOS!", .{});
-                Terminal.init();
             },
-            .macos, .linux, .windows => {
-                Terminal.init();
-            },
+            .macos, .linux, .windows => {},
         }
+
+        terminal.init();
     }
 
     pub fn run(comptime self: App) !void {
@@ -92,7 +77,7 @@ const App = enum {
 
                 if (is_dev) {
                     // Server uses its own allocator
-                    var server_buffer: [4 * 1024 * 1024]u8 = undefined;
+                    var server_buffer: [8 * 1024 * 1024]u8 = undefined;
                     var server_fba = Heap.FixedBufferAllocator.init(&server_buffer);
                     const server_allocator = server_fba.allocator();
 
@@ -133,9 +118,19 @@ const App = enum {
     }
 };
 
+const app: App = if (OS.is_wasm)
+    .wasm
+else if (OS.is_ios)
+    .ios
+else switch (builtin.target.os.tag) {
+    .macos => .macos,
+    .linux => .linux,
+    .windows => .windows,
+    else => @compileError("Unsupported app platform: " ++ @tagName(builtin.target.os.tag)),
+};
+
 pub fn main() !void {
-    const app = comptime App.current();
-    switch (app) {
+    switch (comptime app) {
         inline else => |a| {
             a.init();
             try a.run();

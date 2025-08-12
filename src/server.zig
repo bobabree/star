@@ -139,7 +139,7 @@ pub const HotReloader = struct {
 
                 // Read and hash content
                 const content = file.readToEndAlloc(self.allocator, 10_000_000) catch |err| {
-                    Debug.server.warn("Cannot read {s}: {}", .{ entry.name, err });
+                    Debug.server.warn("Cannot read {s}: {}. Consider increasing FBA memory.", .{ entry.name, err });
                     continue;
                 };
                 defer self.allocator.free(content);
@@ -429,26 +429,26 @@ test "server http buffer allocation" {
 }
 
 test "hot reloader file scanning with memory" {
-    var buffer: [8192]u8 = undefined;
+    var buffer: [8 * 1024 * 1024]u8 = undefined;
     var fba = Heap.FixedBufferAllocator.init(&buffer);
 
     var profile = try ProfiledTest.startWithMemory(@src(), &fba);
 
     var reloader = HotReloader.init(fba.allocator());
-    const latest_mtime = profile.endWithResult(reloader.getLatestMtime());
+    const has_changes = profile.endWithResult(reloader.hasChanges());
 
-    try Testing.expect(latest_mtime >= 0);
+    try Testing.expect(has_changes);
 }
 
 test "hot reloader directory scanning" {
-    var buffer: [4096]u8 = undefined;
+    var buffer: [8 * 1024 * 1024]u8 = undefined;
     var fba = Heap.FixedBufferAllocator.init(&buffer);
 
     var profile = try ProfiledTest.startWithMemory(@src(), &fba);
 
     var reloader = HotReloader.init(fba.allocator());
-    var latest: i128 = 0;
-    profile.endWith(reloader.scanDir("src", &latest));
+    var has_changes = profile.endWithResult(reloader.hasChanges());
+    profile.endWith(reloader.scanDir("src", &has_changes));
 
-    try Testing.expect(latest >= 0);
+    try Testing.expect(has_changes);
 }

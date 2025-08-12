@@ -152,8 +152,10 @@
                                     window.term.dispose();
                                 }
                                 window.term = new Terminal({
-                                    cols: Math.floor(window.innerWidth / 9.2),
+                                    cols: Math.max(80, Math.min(Math.floor(window.innerWidth / 9.2), 132)),
+                                    rows: Math.max(24, Math.min(Math.floor(window.innerHeight / 17), 43))
                                 });
+
                                 window.term.open(document.getElementById(s1));
                                 window.term.onData(data => {
                                     for (let i = 0; i < data.length; i++) {
