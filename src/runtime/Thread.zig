@@ -1,17 +1,43 @@
 const thread = @import("std").Thread;
+
 const Debug = @import("Debug.zig");
+const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
+const Wasm = @import("Wasm.zig");
 
 const Thread = if (OS.is_wasm) WasmThread else thread;
 const SpawnConfig = thread.SpawnConfig;
 const SpawnError = thread.SpawnError;
-const Wasm = @import("Wasm.zig");
+
+pub const default = ThreadFunction.hot_reload;
+
+// Registry of spawnable functions
+pub const ThreadFunction = enum(u32) {
+    hot_reload,
+
+    pub fn run(self: ThreadFunction) void {
+        switch (self) {
+            .hot_reload => hotReloadLoop(),
+        }
+    }
+};
+
+// Map function pointers to ThreadFunction enum at compile time
+fn getFunctionId(comptime function: anytype) ThreadFunction {
+    const function_name = @typeName(@TypeOf(function));
+
+    // Check function signatures or names
+    if (function == hotReloadLoop) return .hot_reload;
+
+    @compileError("Function not registered for WASM threading: " ++ function_name);
+}
 
 pub fn spawn(config: SpawnConfig, comptime function: anytype, args: anytype) SpawnError!Thread {
     if (OS.is_wasm) {
-        return wasmSpawn(config, function, args);
+        const func_id = comptime getFunctionId(function);
+        return wasmSpawn(func_id, args);
     } else {
-        return Thread.spawn(config, function, args);
+        return thread.spawn(config, function, args);
     }
 }
 
@@ -22,79 +48,47 @@ const WasmThread = struct {
         Wasm.threadJoin(self.thread_id);
     }
 
-    pub fn detach(self: WasmThread) void {
-        // Web Workers auto-cleanup
-        _ = self;
+    pub fn detach(_: WasmThread) void {
+        // Web workers should auto cleanup
     }
 };
 
-fn wasmSpawn(config: SpawnConfig, comptime _: anytype, args: anytype) SpawnError!WasmThread {
-    _ = config;
-    _ = args;
+// Store args for each thread
+const MAX_THREADS = 16;
+var thread_args: [MAX_THREADS]?*anyopaque = [_]?*anyopaque{null} ** MAX_THREADS;
+fn wasmSpawn(func_id: ThreadFunction, args: anytype) SpawnError!WasmThread {
+    const thread_id = Wasm.createThread(@intFromEnum(func_id));
 
-    // TODO: For now, just use hot_reload as default task
-    const task_id = @intFromEnum(TaskType.hot_reload);
-    const thread_id = Wasm.createThread(task_id);
+    // TODO: Store args if needed (requires heap allocation for now)
+    if (@sizeOf(@TypeOf(args)) > 0) {}
+
     return WasmThread{ .thread_id = thread_id };
 }
 
-export fn invoke_thread_task(task_id: u32) void {
-    const type_info = @typeInfo(TaskType);
-    inline for (type_info.@"enum".fields) |field| {
-        if (task_id == field.value) {
-            const task = @as(TaskType, @enumFromInt(field.value));
-            Debug.setThreadScope(.wasm, task);
-            task.execute();
-            return;
-        }
-    }
-    Debug.wasm.warn("Unknown task_id: {}", .{task_id});
+// Web Worker entry point
+export fn invoke_thread(func_id: u32) void {
+    const func = @as(ThreadFunction, @enumFromInt(func_id));
+    Debug.setThreadScope(.wasm, func);
+
+    // Run the function
+    func.run();
 }
 
 // TODO is_wasm == Wasm.sleep
 pub const sleep = thread.sleep;
 
-pub const TaskType = enum(u32) {
-    hot_reload = 0,
-    default = 1,
-
-    pub fn getTaskId(comptime self: TaskType) u32 {
-        return @intFromEnum(self);
-    }
-
-    pub fn execute(comptime self: TaskType) void {
-        switch (self) {
-            .hot_reload, .default => self.hotReloadLoop(),
-        }
-    }
-
-    fn hotReloadLoop(comptime self: TaskType) void {
-        _ = self;
-
-        // Initial check
-        Wasm.fetch("/star.wasm", "HEAD", FETCH_WASM_SIZE);
-
-        // Sleep and continue
-        waiting = true;
-        Wasm.sleep(2000);
-    }
-};
-
-pub fn hotReloadTask() void {
-    TaskType.hot_reload.execute();
+pub fn hotReloadLoop() void {
+    Wasm.fetch("/star.wasm", "HEAD", FETCH_WASM_SIZE);
+    waiting = true;
+    Wasm.sleep(1000, @intFromEnum(ThreadFunction.hot_reload)); // Schedule next iteration
 }
 
 const FETCH_WASM_SIZE = 0;
 var waiting = true;
-export fn sleep_callback() void {
-    //Debug.wasm.warn("SLEEP CALLED.", .{});
-
+export fn sleep_callback(func_id: u32) void {
     waiting = false;
-    // Continue the loop
-    Wasm.fetch("/star.wasm", "HEAD", FETCH_WASM_SIZE);
-
-    // Schedule next check
-    Wasm.sleep(1000);
+    invoke_thread(func_id);
+    //Debug.default.success("started for {}.", .{func_id});
 }
 
 var last_wasm_hash: u32 = 0;
@@ -107,7 +101,6 @@ export fn fetch_callback(callback_id: u32, value: u32) void {
             // File changed! But wait - builds write files in stages (truncate -> write -> flush).
             // Reloading mid-write = corrupted WASM. After 3+ checks, file is definitely stable.
             if (reload_counter > 3) {
-                Debug.wasm.info("🔄 WASM changed (hash: {} -> {})", .{ last_wasm_hash, value });
                 Wasm.reloadWasm();
                 reload_counter = 0; // Reset to enforce minimum time between reloads
             }

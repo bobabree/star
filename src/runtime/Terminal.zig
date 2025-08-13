@@ -1,15 +1,16 @@
 const builtin = @import("builtin");
-
 const Debug = @import("Debug.zig");
+const Input = @import("Input.zig");
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
 const Wasm = @import("Wasm.zig");
-const shell = @import("Shell.zig").shell;
+const Channel = @import("Channel.zig");
+const IO = @import("IO.zig");
 
-// Platform-specific state
 var input_buffer: [256]u8 = undefined;
 var input_len: usize = 0;
 var is_initialized: bool = false;
+var input_channel = Channel.DefaultChannel{};
 
 // Native terminal state (for non-wasm platforms)
 var original_mode: if (OS.is_windows) @import("std").os.windows.DWORD else if (OS.is_wasm) void else @import("std").posix.termios = undefined;
@@ -30,59 +31,101 @@ pub const Terminal = enum {
         input_len = 0;
         @memset(&input_buffer, 0);
 
+        // Register callbacks
+        input_channel.onSend(struct {
+            fn callback() void {
+                self.tick();
+            }
+        }.callback);
+
+        IO.stdio.out.channel().onSend(struct {
+            fn callback() void {
+                self.tick();
+            }
+        }.callback);
+    }
+
+    pub fn run(comptime self: Terminal) void {
         switch (self) {
-            .wasm => {},
-            .windows => {
-                // Save original console mode
-                // const std = @import("std");
-                // const handle = std.io.getStdIn().handle;
-                // _ = std.os.windows.kernel32.GetConsoleMode(handle, &original_mode);
-            },
-            .macos, .linux => {
-                // Save original terminal mode
-                // const std = @import("std");
-                // const fd = std.io.getStdIn().handle;
-                // original_mode = std.posix.tcgetattr(fd) catch return;
+            .wasm => {
+                // Initialize the xterm terminal
+                Wasm.terminalInit("terminal");
             },
             else => {
-                Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
+                // Native platforms probably dont need init
             },
         }
+    }
+
+    pub fn tick(comptime self: Terminal) void {
+        self.processInput();
+        self.processOutput();
+    }
+
+    fn processInput(comptime self: Terminal) void {
+        while (input_channel.recv()) |data| {
+            if (data.len > 0) {
+                const event = Input.InputEvent.read(data[0]);
+                const char_opt: ?u8 = switch (event) {
+                    .key => |k| k,
+                    .special => |s| switch (s) {
+                        .enter => @as(u8, 13),
+                        .backspace => @as(u8, 127),
+                        .tab => @as(u8, 9),
+                        .escape => @as(u8, 27),
+                        else => null,
+                    },
+                    .ctrl_key => |k| switch (k) {
+                        .ctrl_c => @as(u8, 3),
+                        .ctrl_d => @as(u8, 4),
+                        .ctrl_z => @as(u8, 26),
+                        .ctrl_l => @as(u8, 12),
+                    },
+                    else => null,
+                };
+
+                const char = char_opt orelse continue;
+
+                if (char == 13) { // Enter
+                    const cmd = input_buffer[0..input_len];
+                    input_len = 0;
+
+                    // Since callbacks are synchronous,
+                    // write output BEFORE send() for it to appear first.
+                    self.write("\r\n");
+                    IO.stdio.in.send(cmd);
+                } else if (char == 127 or char == 8) { // Backspace
+                    if (input_len > 0) {
+                        input_len -= 1;
+                        self.write("\x08 \x08");
+                    }
+                } else if (input_len < 255) {
+                    input_buffer[input_len] = char;
+                    input_len += 1;
+                    var echo: [1]u8 = .{char};
+                    self.write(&echo);
+                }
+            }
+        }
+    }
+
+    fn processOutput(comptime self: Terminal) void {
+        while (IO.stdio.out.recv()) |output| {
+            self.write(output);
+        }
+    }
+
+    pub fn getChannel(_: Terminal) *Channel.DefaultChannel {
+        return &input_channel;
     }
 
     pub fn enterRawMode(comptime self: Terminal) void {
         if (is_raw_mode) return;
 
         switch (self) {
-            .wasm => {
-                // WASM terminal is always in "raw" mode
-            },
-            .windows => {
-                // const std = @import("std");
-                // const handle = std.io.getStdIn().handle;
-                // const ENABLE_ECHO_INPUT: u32 = 0x0004;
-                // const ENABLE_LINE_INPUT: u32 = 0x0002;
-                // const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
-
-                // const new_mode = original_mode & ~@as(u32, ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT);
-                // _ = std.os.windows.kernel32.SetConsoleMode(handle, new_mode);
-            },
-            .macos, .linux => {
-                // const std = @import("std");
-                // const fd = std.io.getStdIn().handle;
-
-                // var new_mode = original_mode;
-                // new_mode.lflag.ECHO = false;
-                // new_mode.lflag.ICANON = false;
-                // new_mode.lflag.ISIG = false;
-                // new_mode.lflag.IEXTEN = false;
-                // new_mode.iflag.IXON = false;
-                // new_mode.iflag.ICRNL = false;
-                // new_mode.cc[@intFromEnum(std.posix.V.MIN)] = 1;
-                // new_mode.cc[@intFromEnum(std.posix.V.TIME)] = 0;
-
-                // std.posix.tcsetattr(fd, std.posix.TCSA.NOW, new_mode) catch {};
-            },
+            .wasm => {},
+            .windows => {},
+            .macos, .linux => {},
             else => {
                 Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
             },
@@ -95,19 +138,9 @@ pub const Terminal = enum {
         if (!is_raw_mode) return;
 
         switch (self) {
-            .wasm => {
-                // Nothing to restore in WASM
-            },
-            .windows => {
-                // const std = @import("std");
-                // const handle = std.io.getStdIn().handle;
-                // _ = std.os.windows.kernel32.SetConsoleMode(handle, original_mode);
-            },
-            .macos, .linux => {
-                // const std = @import("std");
-                // const fd = std.io.getStdIn().handle;
-                // std.posix.tcsetattr(fd, std.posix.TCSA.NOW, original_mode) catch {};
-            },
+            .wasm => {},
+            .windows => {},
+            .macos, .linux => {},
             else => {
                 Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
             },
@@ -119,10 +152,7 @@ pub const Terminal = enum {
     pub fn clear(comptime self: Terminal) void {
         switch (self) {
             .wasm => Wasm.terminalWrite("\x1b[2J\x1b[H"),
-            .windows, .macos, .linux => {
-                // const std = @import("std");
-                // std.io.getStdOut().writeAll("\x1b[2J\x1b[H") catch {};
-            },
+            .windows, .macos, .linux => {},
             else => {
                 Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
             },
@@ -133,7 +163,7 @@ pub const Terminal = enum {
         switch (self) {
             .wasm => Wasm.terminalWrite(text),
             .windows, .macos, .linux => {
-                // const std = @import("std");
+                // Native: write to stdout
                 // std.io.getStdOut().writeAll(text) catch {};
             },
             else => {
@@ -145,36 +175,10 @@ pub const Terminal = enum {
     pub fn getSize(comptime self: Terminal) struct { cols: u16, rows: u16 } {
         switch (self) {
             .wasm => {
-                // TODO: These are set by JavaScript when terminal is initialized
                 return .{ .cols = 80, .rows = 24 };
             },
-            .windows => {
-                // const std = @import("std");
-                // var csbi: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
-                // const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse {
-                //     return .{ .cols = 80, .rows = 24 };
-                // };
-
-                // if (std.os.windows.kernel32.GetConsoleScreenBufferInfo(handle, &csbi) == 0) {
-                //     return .{ .cols = 80, .rows = 24 };
-                // }
-
-                // return .{
-                //     .cols = @intCast(csbi.srWindow.Right - csbi.srWindow.Left + 1),
-                //     .rows = @intCast(csbi.srWindow.Bottom - csbi.srWindow.Top + 1),
-                // };
-            },
-            .macos, .linux => {
-                // const std = @import("std");
-                // var ws: std.posix.winsize = undefined;
-                // const result = std.c.ioctl(std.posix.STDOUT_FILENO, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
-
-                // if (result != 0) {
-                //     return .{ .cols = 80, .rows = 24 };
-                // }
-
-                // return .{ .cols = ws.col, .rows = ws.row };
-            },
+            .windows => {},
+            .macos, .linux => {},
             else => {
                 Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
             },
@@ -192,27 +196,3 @@ else switch (builtin.target.os.tag) {
     .windows => .windows,
     else => @compileError("Unsupported terminal platform: " ++ @tagName(builtin.target.os.tag)),
 };
-
-// WASM-specific export for keyboard input
-export fn terminal_key(char: u8) void {
-    if (char == 13) { // Enter key
-        const cmd = input_buffer[0..input_len];
-        shell.processCommand(comptime terminal, cmd);
-
-        input_len = 0;
-
-        terminal.write("\r\n");
-        shell.showPrompt(comptime terminal);
-    } else if (char == 127 or char == 8) { // Backspace
-        if (input_len > 0) {
-            input_len -= 1;
-            terminal.write("\x08 \x08");
-        }
-    } else if (input_len < 255) {
-        input_buffer[input_len] = char;
-        input_len += 1;
-
-        var echo: [1]u8 = .{char};
-        terminal.write(&echo);
-    }
-}

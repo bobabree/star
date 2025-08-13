@@ -42,15 +42,15 @@ const scope_levels: []const ScopeLevel = &.{
 
 // Thread-local scope management
 threadlocal var current_scope: Scope = Scope.default;
-threadlocal var current_task: Thread.TaskType = Thread.TaskType.default;
+threadlocal var current_thread: Thread.ThreadFunction = Thread.default;
 
-pub fn setThreadScope(scope: Scope, task: Thread.TaskType) void {
+pub fn setThreadScope(scope: Scope, thread: Thread.ThreadFunction) void {
     current_scope = scope;
-    current_task = task;
+    current_thread = thread;
 }
 
-fn getCurrentTask() Thread.TaskType {
-    return current_task;
+fn getCurrentThread() Thread.ThreadFunction {
+    return current_thread;
 }
 
 pub fn getCurrentScope() Scope {
@@ -249,11 +249,11 @@ const Scope = enum(u8) {
             "[" ++ @tagName(self) ++ "][" ++ @tagName(message_level) ++ "] ";
 
         var buffer = Utf8Buffer(4096).init();
-        const task = getCurrentTask();
-        if (task == Thread.TaskType.default)
+        const thread = getCurrentThread();
+        if (thread == Thread.default)
             buffer.format(prefix ++ format ++ "\n", args)
         else
-            buffer.format("[{s}]" ++ prefix ++ format ++ "\n", .{@tagName(task)} ++ args);
+            buffer.format("[{s}]" ++ prefix ++ format ++ "\n", .{@tagName(thread)} ++ args);
 
         const message = buffer.constSlice();
         self.logMessage(message_level, message);

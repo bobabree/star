@@ -134,7 +134,7 @@
                             threads[id] = thread;
                             
                             thread.postMessage({ type: 'init', module: wasmModule, threadId: id });
-                            thread.postMessage({ type: 'run', task_id: id });
+                            thread.postMessage({ type: 'run', func_id: id });
                             
                             return id;
 
@@ -159,7 +159,7 @@
                                 window.term.open(document.getElementById(s1));
                                 window.term.onData(data => {
                                     for (let i = 0; i < data.length; i++) {
-                                        wasmExports.terminal_key(data.charCodeAt(i));
+                                        wasmExports.input_key(data.charCodeAt(i));
                                     }
                                 });
                             }
@@ -203,7 +203,9 @@
                         case 8: // sleep
                             // TODO: consider Atomics.wait without SAB
                             //       for now, just use setTimeout in worker
-                            setTimeout(() => wasmExports.sleep_callback(), id);
+                            const ms = id;
+                            const func_id = len1; 
+                            setTimeout(() => wasmExports.sleep_callback(func_id), ms);
                             return 0;
 
                         case 9: // reloadWasm
@@ -235,7 +237,7 @@
                         } 
                         else if (e.data.type === 'run') {
                             if (wasmExports) {
-                                wasmExports.invoke_thread_task(e.data.task_id);
+                                wasmExports.invoke_thread(e.data.func_id);
                             }
                         }
                     };

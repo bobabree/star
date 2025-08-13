@@ -154,19 +154,19 @@ pub const WasmOp = enum(u32) {
             .log => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
             .warn => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
             .err => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .createThread => wasm_op(@intFromEnum(self), args.task_id, null, 0, null, 0),
+            .createThread => wasm_op(@intFromEnum(self), args.func_id, null, 0, null, 0),
             .threadJoin => wasm_op(@intFromEnum(self), args.thread_id, null, 0, null, 0),
             .terminalInit => wasm_op(@intFromEnum(self), 0, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
             .terminalWrite => wasm_op(@intFromEnum(self), 0, args.text.ptr, @intCast(args.text.len), null, 0),
             .fetch => wasm_op(@intFromEnum(self), args.callback_id, args.url.ptr, @intCast(args.url.len), args.method.ptr, @intCast(args.method.len)),
-            .sleep => wasm_op(@intFromEnum(self), args.ms, null, 0, null, 0),
+            .sleep => wasm_op(@intFromEnum(self), args.ms, null, args.func_id, null, 0),
             .reloadWasm => wasm_op(@intFromEnum(self), 0, null, 0, null, 0),
         };
     }
 };
 
-pub fn createThread(task_id: u32) u32 {
-    return WasmOp.createThread.invoke(.{ .task_id = task_id });
+pub fn createThread(func_id: u32) u32 {
+    return WasmOp.createThread.invoke(.{ .func_id = func_id });
 }
 
 pub fn threadJoin(thread_id: u32) void {
@@ -185,8 +185,8 @@ pub fn fetch(url: []const u8, method: []const u8, callback_id: u32) void {
     _ = WasmOp.fetch.invoke(.{ .url = url, .method = method, .callback_id = callback_id });
 }
 
-pub fn sleep(ms: u32) void {
-    _ = WasmOp.sleep.invoke(.{ .ms = ms });
+pub fn sleep(ms: u32, func_id: u32) void {
+    _ = WasmOp.sleep.invoke(.{ .ms = ms, .func_id = func_id });
 }
 
 pub fn reloadWasm() void {
@@ -333,14 +333,6 @@ pub fn buildUI() void {
             terminalElement,
         }));
     }
-
-    terminalInit("terminal");
-
-    terminalWrite("\x1b[2J\x1b[H");
-    terminalWrite("Welcome to \x1b[1;36mStarOS!\x1b[0m\r\n");
-
-    terminalWrite("Type \x1b[1;32mhelp\x1b[0m for instructions on how to use StarOS\r\n");
-    terminalWrite("\x1b[1;32mroot\x1b[0m@\x1b[1;36mStarOS\x1b[0m \x1b[1;32m~\x1b[0m> ");
 }
 
 // Example:

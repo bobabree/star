@@ -12,6 +12,9 @@ const Thread = runtime.Thread;
 const Time = runtime.Time;
 const Wasm = runtime.Wasm;
 const builtin = runtime.builtin;
+
+const input = runtime.Input.input;
+const shell = runtime.Shell.shell;
 const terminal = runtime.Terminal.terminal;
 
 var buffer: [1 * 1024 * 1024]u8 = undefined;
@@ -58,7 +61,21 @@ const App = enum {
             .macos, .linux, .windows => {},
         }
 
-        terminal.init();
+        {
+            terminal.init();
+            terminal.run();
+        }
+
+        {
+            shell.init();
+            shell.run();
+        }
+
+        {
+            input.init();
+            input.register(terminal);
+            input.run();
+        }
     }
 
     pub fn run(comptime self: App) !void {
@@ -102,7 +119,7 @@ const App = enum {
             .wasm => {
                 Debug.wasm.info("Hot reload enabled (polling mode)", .{});
 
-                const thread = Thread.spawn(.{}, Thread.hotReloadTask, .{}) catch |err| {
+                const thread = Thread.spawn(.{}, Thread.hotReloadLoop, .{}) catch |err| {
                     Debug.wasm.err("Failed to spawn hot reload thread: {}", .{err});
                     return;
                 };
