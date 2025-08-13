@@ -50,7 +50,9 @@ pub const Shell = enum {
             IO.stdio.out.send(cmd);
         }
 
-        IO.stdio.out.send("\r\n");
+        if (cmd.len > 0) {
+            IO.stdio.out.send("\r\n");
+        }
         self.showPrompt();
     }
 
@@ -63,7 +65,7 @@ pub const Shell = enum {
 
     fn showPrompt(comptime self: Shell) void {
         _ = self;
-        // TODO: bold green
+        // TODO: shell.json, bold green
         IO.stdio.out.send("\x1b[1;32mroot\x1b[0m@\x1b[1;36mStarOS\x1b[0m \x1b[1;32m~\x1b[0m> ");
     }
 

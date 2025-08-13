@@ -7,6 +7,7 @@ const Debug = runtime.Debug;
 const Fmt = runtime.Fmt;
 const Fs = runtime.Fs;
 const FsPath = runtime.FsPath;
+const Hash = runtime.Hash;
 const Http = runtime.Http;
 const Heap = runtime.Heap;
 const Mem = runtime.Mem;
@@ -19,18 +20,66 @@ const Time = runtime.Time;
 // Embed HTML
 const html_content = @embedFile("web/index.min.html");
 
-pub fn run() !void {
+pub fn main() !void {
     // Server gets its own allocator
-    var buffer: [1024 * 1024]u8 = undefined;
+    var buffer: [4 * 1024 * 1024]u8 = undefined;
     var fba = Heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
-    var server = Server.init(allocator, true);
-
-    // Run server in background thread
-    const server_thread = try Thread.spawn(.{}, Server.run, .{&server});
-    server_thread.detach();
+    var server = runtime.server.Server.init(allocator, true);
+    try server.run();
 }
+
+const FileHashMap = struct {
+    const MAX_FILES = 256;
+    const MAX_PATH_LEN = 256;
+
+    const Entry = struct {
+        path: [MAX_PATH_LEN]u8,
+        path_len: u16,
+        hash: u64,
+        used: bool,
+    };
+
+    entries: [MAX_FILES]Entry = [_]Entry{.{
+        .path = undefined,
+        .path_len = 0,
+        .hash = 0,
+        .used = false,
+    }} ** MAX_FILES,
+
+    pub fn get(self: *const @This(), path: []const u8) ?u64 {
+        for (self.entries) |entry| {
+            if (!entry.used) continue;
+            if (Mem.eql(u8, entry.path[0..entry.path_len], path)) {
+                return entry.hash;
+            }
+        }
+        return null;
+    }
+
+    pub fn put(self: *@This(), path: []const u8, hash: u64) !void {
+        for (&self.entries) |*entry| {
+            if (!entry.used) continue;
+            if (Mem.eql(u8, entry.path[0..entry.path_len], path)) {
+                entry.hash = hash;
+                return;
+            }
+        }
+
+        for (&self.entries) |*entry| {
+            if (!entry.used) {
+                if (path.len > MAX_PATH_LEN) return error.PathTooLong;
+                @memcpy(entry.path[0..path.len], path);
+                entry.path_len = @intCast(path.len);
+                entry.hash = hash;
+                entry.used = true;
+                return;
+            }
+        }
+        return error.MapFull;
+    }
+};
 
 pub const HotReloader = struct {
     allocator: Mem.Allocator,
@@ -38,7 +87,7 @@ pub const HotReloader = struct {
     rebuild_cmd: []const []const u8,
     should_stop: Atomic.Value(bool),
     last_server_mtime: i128,
-    file_hashes: @import("std").StringHashMap(u64),
+    file_hashes: FileHashMap,
 
     pub fn init(allocator: Mem.Allocator) HotReloader {
         const files_requiring_restart = [_][]const u8{
@@ -69,7 +118,7 @@ pub const HotReloader = struct {
             .rebuild_cmd = rebuild_cmd,
             .should_stop = Atomic.Value(bool).init(false),
             .last_server_mtime = initial_mtime,
-            .file_hashes = @import("std").StringHashMap(u64).init(allocator),
+            .file_hashes = FileHashMap{},
         };
     }
 
@@ -110,6 +159,19 @@ pub const HotReloader = struct {
         return changed;
     }
 
+    fn hashFile(file: Fs.File) !u64 {
+        var hasher = Hash.Wyhash.init(0);
+        var buffer: [4096]u8 = undefined;
+
+        while (true) {
+            const n = try file.read(&buffer);
+            if (n == 0) break;
+            hasher.update(buffer[0..n]);
+        }
+
+        return hasher.final();
+    }
+
     fn scanDir(self: *HotReloader, dir_path: []const u8, changed: *bool) !void {
         var dir = Fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
             Debug.server.warn("Cannot open dir {s}: {}", .{ dir_path, err });
@@ -137,14 +199,10 @@ pub const HotReloader = struct {
                 };
                 defer file.close();
 
-                // Read and hash content
-                const content = file.readToEndAlloc(self.allocator, 10_000_000) catch |err| {
-                    Debug.server.warn("Cannot read {s}: {}. Consider increasing FBA memory.", .{ entry.name, err });
+                const hash = hashFile(file) catch |err| {
+                    Debug.server.warn("Cannot hash {s}: {}", .{ entry.name, err });
                     continue;
                 };
-                defer self.allocator.free(content);
-
-                const hash = @import("std").hash.Wyhash.hash(0, content);
 
                 // Build full path for hash map key
                 var path_buf: [Fs.max_path_bytes]u8 = undefined;
@@ -157,14 +215,15 @@ pub const HotReloader = struct {
                 if (self.file_hashes.get(full_path)) |old_hash| {
                     if (old_hash != hash) {
                         Debug.server.info("📝 Content changed: {s}", .{full_path});
-                        const key = self.allocator.dupe(u8, full_path) catch continue;
-                        self.file_hashes.put(key, hash) catch continue;
+                        self.file_hashes.put(full_path, hash) catch |err| {
+                            Debug.server.warn("Cannot track {s}: {}", .{ full_path, err });
+                        };
                         changed.* = true;
                     }
                 } else {
-                    // New file or first scan
-                    const key = self.allocator.dupe(u8, full_path) catch continue;
-                    self.file_hashes.put(key, hash) catch continue;
+                    self.file_hashes.put(full_path, hash) catch |err| {
+                        Debug.server.warn("Cannot track new file {s}: {}", .{ full_path, err });
+                    };
                     changed.* = true;
                 }
             } else if (entry.kind == .directory) {

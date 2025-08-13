@@ -1,14 +1,16 @@
-const OS = @import("OS.zig");
-const Debug = @import("Debug.zig");
 const builtin = @import("builtin");
-const std = @import("std");
 const Channel = @import("Channel.zig");
+const Debug = @import("Debug.zig");
+const Fs = @import("Fs.zig");
+const OS = @import("OS.zig");
+const Posix = @import("Posix.zig");
+const Thread = @import("Thread.zig");
 
 var registered_channels: [16]*Channel.DefaultChannel = undefined;
 var channel_count: usize = 0;
 
 // For native platforms
-var stdin_reader: ?std.fs.File.Reader = null;
+var stdin_reader: ?Fs.File.Reader = null;
 
 pub const InputEvent = union(enum) {
     key: u8,
@@ -74,42 +76,42 @@ pub const Input = enum {
             .wasm => {
                 // JavaScript calls input_key directly - no setup needed
             },
-            .macos => {
-                // macOS: Use kqueue to monitor stdin
-                // const kq = std.os.kqueue() catch return;
-                // var change = kevent{
-                //     .ident = @intCast(std.posix.STDIN_FILENO),
-                //     .filter = EVFILT_READ,
-                //     .flags = EV_ADD | EV_ENABLE,
-                // };
-                // kevent(kq, &change, 1, null, 0, null);
-                // Main loop will kevent(kq, null, 0, &events, 1, null) to wait
-            },
-            .linux => {
-                // Linux: Use epoll to monitor stdin
-                // const epfd = std.os.epoll_create1(0) catch return;
-                // var ev = epoll_event{
-                //     .events = EPOLLIN,
-                //     .data = .{ .fd = std.posix.STDIN_FILENO },
-                // };
-                // epoll_ctl(epfd, EPOLL_CTL_ADD, std.posix.STDIN_FILENO, &ev);
-                // Main loop will epoll_wait(epfd, &events, 1, -1) to wait
-
-            },
-            .windows => {
-                // Windows: Use ReadConsoleInput with async callback
-                // const handle = GetStdHandle(STD_INPUT_HANDLE);
-                // var input_record: INPUT_RECORD = undefined;
-                // ReadConsoleInput(handle, &input_record, 1, &events_read);
-                // Or use IOCP for async
-
+            .macos, .linux, .windows => {
+                // Spawn polling thread for stdin
+                const thread = Thread.spawn(.{}, pollStdin, .{self}) catch |err| {
+                    Debug.default.err("Failed to spawn input thread: {}", .{err});
+                    return;
+                };
+                thread.detach();
             },
             .ios => {
-                // iOS: Use Grand Central Dispatch
-                // dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, STDIN_FILENO, ...)
-                // dispatch_source_set_event_handler(source, ^{ processStdin(); });
-                // dispatch_resume(source);
+                // TODO: iOS event handling
             },
+        }
+    }
+
+    fn pollStdin(comptime self: Input) void {
+        const handle = switch (builtin.target.os.tag) {
+            .windows => OS.windows.GetStdHandle(OS.windows.STD_INPUT_HANDLE) catch |err| {
+                Debug.default.err("Failed to get stdin handle: {}", .{err});
+                return;
+            },
+            else => Posix.STDIN_FILENO,
+        };
+
+        const stdin = Fs.File{ .handle = handle };
+
+        var buffer: [1]u8 = undefined;
+        while (true) {
+            const n = stdin.read(&buffer) catch |err| {
+                Debug.default.err("Failed to read stdin: {}", .{err});
+                Thread.sleep(10_000_000);
+                continue;
+            };
+            if (n > 0) {
+                const event = InputEvent.read(buffer[0]);
+                self.broadcast(event);
+            }
         }
     }
 

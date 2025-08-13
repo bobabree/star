@@ -113,10 +113,11 @@ const PlatformType = enum {
     pub fn createPlatformArtifacts(comptime self: PlatformType, options: BuildOptions) void {
         const runtime_module = self.createRuntimeModule(options);
         const wasm = self.createWasmArtifact(options, runtime_module);
+        const app = self.createAppArtifact(options, runtime_module);
         const server = self.createServerArtifact(options, runtime_module);
 
-        self.setupPlatform(options, server, runtime_module);
-        self.installArtifacts(options, server, wasm);
+        self.setupPlatform(options, app, runtime_module);
+        self.installArtifacts(options, app, wasm, server);
     }
 
     pub fn createModuleOptions(
@@ -187,7 +188,7 @@ const PlatformType = enum {
         };
     }
 
-    pub fn createServerArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
+    pub fn createAppArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
         const exe_module = options.b.createModule(self.createModuleOptions(
             options.b,
             options.b.path("src/app.zig"),
@@ -199,6 +200,25 @@ const PlatformType = enum {
             exe.linkage = .static;
         }
         return exe;
+    }
+
+    pub fn createServerArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) ?*std.Build.Step.Compile {
+        if (self.isWasm()) return null;
+
+        const server_module = options.b.createModule(self.createModuleOptions(
+            options.b,
+            options.b.path("src/server.zig"),
+            options.optimize,
+        ));
+        server_module.addImport("runtime", runtime_module);
+        const server = options.b.addExecutable(.{ .name = "server", .root_module = server_module });
+        if (self.useStatic()) {
+            server.linkage = .static;
+        }
+        if (self.isWindows()) {
+            self.linkWindowsLibs(server);
+        }
+        return server;
     }
 
     pub fn createWasmArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
@@ -336,12 +356,20 @@ const PlatformType = enum {
         options.test_step.dependOn(&test_install.step);
     }
 
-    pub fn installArtifacts(comptime self: PlatformType, options: BuildOptions, server: *std.Build.Step.Compile, wasm: *std.Build.Step.Compile) void {
-        if (self.isIOS()) return; // iOS install handled in setupIOS
+    pub fn installArtifacts(comptime self: PlatformType, options: BuildOptions, app: *std.Build.Step.Compile, wasm: *std.Build.Step.Compile, server: ?*std.Build.Step.Compile) void {
+        if (self.isIOS()) return;
 
-        // Install the primary artifact for this platform
-        const primary_artifact = if (self.isWasm()) wasm else server;
+        // Install app
+        const primary_artifact = if (self.isWasm()) wasm else app;
         self.installNativePlatform(options, primary_artifact);
+
+        // Install server if it exists
+        if (server) |s| {
+            const server_install = options.b.addInstallArtifact(s, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
+            if (options.install_step) |step| {
+                step.dependOn(&server_install.step);
+            }
+        }
 
         // Process wasm
         self.installWasmPlatform(options, wasm, primary_artifact);

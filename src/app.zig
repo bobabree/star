@@ -87,28 +87,8 @@ const App = enum {
                 // iOS runs in its own event loop
             },
             .macos, .linux, .windows => {
-                // Check for --dev flag
-                const is_dev = for (args.constSlice()) |arg| {
-                    if (Mem.eql(u8, arg.constSlice(), "--dev")) break true;
-                } else false;
-
-                if (is_dev) {
-                    // Server uses its own allocator
-                    var server_buffer: [8 * 1024 * 1024]u8 = undefined;
-                    var server_fba = Heap.FixedBufferAllocator.init(&server_buffer);
-                    const server_allocator = server_fba.allocator();
-
-                    var server = Server.init(server_allocator, is_dev);
-                    // Run server in background thread
-                    const server_thread = try Thread.spawn(.{}, Server.run, .{&server});
-                    server_thread.detach();
-                }
-
-                // TODO: Main thread
                 while (true) {
-                    const timestamp = Time.timestamp();
-                    Debug.server.warn("Current time: {}", .{timestamp});
-                    Thread.sleep(30 * Time.ns_per_s);
+                    Thread.sleep(60 * Time.ns_per_s);
                 }
             },
         }

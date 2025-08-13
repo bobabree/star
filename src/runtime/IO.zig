@@ -10,6 +10,7 @@ pub const poll = io.poll;
 var stdin_channel = Channel.DefaultChannel{};
 var stdout_channel = Channel.DefaultChannel{};
 var stderr_channel = Channel.DefaultChannel{};
+
 pub const stdio = enum {
     in,
     out,

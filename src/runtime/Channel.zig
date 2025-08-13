@@ -1,4 +1,4 @@
-const std = @import("std");
+const Atomic = @import("Atomic.zig");
 
 pub const MESSAGE_SIZE = 256;
 pub const QUEUE_SIZE = 32;
@@ -9,8 +9,8 @@ pub fn Channel(comptime capacity: usize) type {
 
         buffer: [capacity][MESSAGE_SIZE]u8 = undefined,
         lengths: [capacity]u16 = undefined,
-        write_pos: std.atomic.Value(usize) align(64) = std.atomic.Value(usize).init(0),
-        read_pos: std.atomic.Value(usize) align(64) = std.atomic.Value(usize).init(0),
+        write_pos: Atomic.Value(usize) align(64) = Atomic.Value(usize).init(0),
+        read_pos: Atomic.Value(usize) align(64) = Atomic.Value(usize).init(0),
         on_send_callback: ?*const fn () void = null,
 
         pub fn send(self: *Self, data: []const u8) bool {

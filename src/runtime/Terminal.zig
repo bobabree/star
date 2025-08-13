@@ -1,11 +1,15 @@
 const builtin = @import("builtin");
+const Channel = @import("Channel.zig");
 const Debug = @import("Debug.zig");
+const Fs = @import("Fs.zig");
 const Input = @import("Input.zig");
+const IO = @import("IO.zig");
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
+const Posix = @import("Posix.zig");
+const Thread = @import("Thread.zig");
+const Time = @import("Time.zig");
 const Wasm = @import("Wasm.zig");
-const Channel = @import("Channel.zig");
-const IO = @import("IO.zig");
 
 var input_buffer: [256]u8 = undefined;
 var input_len: usize = 0;
@@ -13,7 +17,6 @@ var is_initialized: bool = false;
 var input_channel = Channel.DefaultChannel{};
 
 // Native terminal state (for non-wasm platforms)
-var original_mode: if (OS.is_windows) @import("std").os.windows.DWORD else if (OS.is_wasm) void else @import("std").posix.termios = undefined;
 var width: u16 = 80;
 var height: u16 = 24;
 var is_raw_mode: bool = false;
@@ -52,8 +55,35 @@ pub const Terminal = enum {
                 Wasm.terminalInit("terminal");
             },
             else => {
-                // Native platforms probably dont need init
+                // Native
+                terminalInit("terminal");
             },
+        }
+    }
+
+    fn terminalInit(_: []const u8) void {
+        const stderr_thread = Thread.spawn(.{}, terminalWrite, .{}) catch return;
+        stderr_thread.detach();
+    }
+
+    fn terminalWrite() void {
+        const handle = switch (builtin.target.os.tag) {
+            .windows => OS.windows.GetStdHandle(OS.windows.STD_ERROR_HANDLE) catch |err| {
+                Debug.default.err("Failed to get stderr handle: {}", .{err});
+                return;
+            },
+            else => Posix.STDERR_FILENO,
+        };
+
+        const stderr = Fs.File{ .handle = handle };
+
+        while (true) {
+            if (IO.stdio.err.recv()) |text| {
+                stderr.writeAll(text) catch |err| {
+                    Debug.default.err("Failed to write stderr: {}", .{err});
+                };
+            }
+            Thread.sleep(1_000_000);
         }
     }
 
@@ -92,18 +122,30 @@ pub const Terminal = enum {
 
                     // Since callbacks are synchronous,
                     // write output BEFORE send() for it to appear first.
-                    self.write("\r\n");
+                    switch (self) {
+                        .wasm => self.write("\r\n"),
+                        else => {},
+                    }
+
                     IO.stdio.in.send(cmd);
                 } else if (char == 127 or char == 8) { // Backspace
                     if (input_len > 0) {
                         input_len -= 1;
-                        self.write("\x08 \x08");
+                        switch (self) {
+                            .wasm => self.write("\x08 \x08"),
+                            else => {},
+                        }
                     }
                 } else if (input_len < 255) {
                     input_buffer[input_len] = char;
                     input_len += 1;
-                    var echo: [1]u8 = .{char};
-                    self.write(&echo);
+                    switch (self) {
+                        .wasm => {
+                            var echo: [1]u8 = .{char};
+                            self.write(&echo);
+                        },
+                        else => {},
+                    }
                 }
             }
         }
@@ -163,8 +205,7 @@ pub const Terminal = enum {
         switch (self) {
             .wasm => Wasm.terminalWrite(text),
             .windows, .macos, .linux => {
-                // Native: write to stdout
-                // std.io.getStdOut().writeAll(text) catch {};
+                IO.stdio.err.send(text); // this will trigger native terminalWrite
             },
             else => {
                 Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
