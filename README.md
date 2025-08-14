@@ -17,7 +17,7 @@ star build
 ```
 
 ***[(Demo Only) Star also provides an ultra-lightweight (<1MB) portable OS](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to native systems.***
-<img width="2556" height="1179" alt="iphone" src="https://github.com/user-attachments/assets/99ae9a9e-d36f-4737-9256-e193e7bcf8c4" />
+
 
 ## Platform Support
 
