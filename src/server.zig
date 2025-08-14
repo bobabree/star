@@ -88,6 +88,7 @@ pub const HotReloader = struct {
     should_stop: Atomic.Value(bool),
     last_server_mtime: i128,
     file_hashes: FileHashMap,
+    last_build_failed: bool,
 
     pub fn init(allocator: Mem.Allocator) HotReloader {
         const files_requiring_restart = [_][]const u8{
@@ -119,6 +120,7 @@ pub const HotReloader = struct {
             .should_stop = Atomic.Value(bool).init(false),
             .last_server_mtime = initial_mtime,
             .file_hashes = FileHashMap{},
+            .last_build_failed = false,
         };
     }
 
@@ -135,12 +137,18 @@ pub const HotReloader = struct {
             var changed = false;
             for (self.watch_dirs) |dir_name| {
                 self.scanDir(dir_name, &changed) catch |err| {
-                    Debug.server.warn("Failed to scan {s}: {}", .{ dir_name, err });
+                    Debug.server.warn("failed to scan {s}: {}", .{ dir_name, err });
                 };
             }
 
             if (changed) {
-                self.rebuild();
+                // On Windows, don't rebuild constantly if last build failed
+                if (builtin.target.os.tag == .windows and self.last_build_failed) {
+                    // Wait for another change before trying again
+                    self.last_build_failed = false;
+                } else {
+                    self.rebuild();
+                }
             }
 
             Thread.sleep(Time.ns_per_s / 2);
@@ -183,6 +191,7 @@ pub const HotReloader = struct {
         while (try iter.next()) |entry| {
             if (entry.kind == .file) {
                 // Skip generated files first
+
                 if (Mem.endsWith(u8, entry.name, ".lib") or
                     Mem.endsWith(u8, entry.name, ".min.html")) continue;
 
@@ -214,7 +223,7 @@ pub const HotReloader = struct {
                 // Check if hash changed
                 if (self.file_hashes.get(full_path)) |old_hash| {
                     if (old_hash != hash) {
-                        Debug.server.info("📝 Content changed: {s}", .{full_path});
+                        Debug.server.info("Content canged: {s}", .{full_path});
                         self.file_hashes.put(full_path, hash) catch |err| {
                             Debug.server.warn("Cannot track {s}: {}", .{ full_path, err });
                         };
@@ -224,9 +233,14 @@ pub const HotReloader = struct {
                     self.file_hashes.put(full_path, hash) catch |err| {
                         Debug.server.warn("Cannot track new file {s}: {}", .{ full_path, err });
                     };
-                    changed.* = true;
                 }
             } else if (entry.kind == .directory) {
+                if (Mem.eql(u8, entry.name, ".zig-cache")) continue;
+                if (Mem.eql(u8, entry.name, "zig-out")) continue;
+                if (Mem.eql(u8, entry.name, ".git")) continue;
+                if (Mem.eql(u8, entry.name, "debug")) continue;
+                if (Mem.eql(u8, entry.name, "release")) continue;
+
                 var path_buf: [Fs.max_path_bytes]u8 = undefined;
                 const sub_path = FsPath.join(&path_buf, &.{ dir_path, entry.name }) catch |err| {
                     Debug.server.warn("Path too long for {s}/{s}: {}", .{ dir_path, entry.name, err });
@@ -241,17 +255,24 @@ pub const HotReloader = struct {
     }
 
     fn rebuild(self: *HotReloader) void {
-        Debug.server.info("🔄 Rebuilding...", .{});
+        Debug.server.info("Rebuilding...", .{});
 
+        const build_start_time = Time.timestamp();
         var child = Process.Child.init(self.rebuild_cmd, self.allocator);
 
         const term = child.spawnAndWait() catch |err| {
-            Debug.server.err("❌ Build failed: {}", .{err});
+            Debug.server.err("Build failed: {}", .{err});
+            if (builtin.target.os.tag == .windows) {
+                self.last_build_failed = true;
+            }
             return;
         };
 
         if (term == .Exited and term.Exited == 0) {
-            Debug.server.success("✅ Build completed", .{});
+            Debug.server.success("Build completed", .{});
+            if (builtin.target.os.tag == .windows) {
+                self.last_build_failed = false;
+            }
 
             // Check if any file requiring restart was modified
             const files_requiring_restart = [_][]const u8{
@@ -267,21 +288,67 @@ pub const HotReloader = struct {
                 const stat = file.stat() catch continue;
 
                 if (stat.mtime > self.last_server_mtime) {
-                    Debug.server.info("📝 {s} changed", .{path});
+                    Debug.server.info("{s} changed", .{path});
                     needs_restart = true;
                     break;
                 }
             }
 
             if (needs_restart) {
-                Debug.server.info("🔄 Restarting server...", .{});
+                Debug.server.info("Restarting server...", .{});
                 Process.restartSelf(self.allocator) catch |err| {
-                    Debug.server.err("❌ Failed to restart: {}", .{err});
+                    Debug.server.err("Failed to restart: {}", .{err});
                 };
                 self.last_server_mtime = Time.timestamp(); // Update to current time
             }
         } else {
-            Debug.server.err("❌ Build failed with exit code: {}", .{term.Exited});
+            // On Windows, check if build actually succeeded but just couldn't copy
+            if (builtin.target.os.tag == .windows and term.Exited == 1) {
+                // Check if a new server.exe exists in .zig-cache
+                var found_new_exe = false;
+                var cache_dir = Fs.cwd().openDir(".zig-cache/o", .{ .iterate = true }) catch {
+                    Debug.server.err("Build failed with exit code: {}", .{term.Exited});
+                    return;
+                };
+                defer cache_dir.close();
+
+                var walker = cache_dir.walk(self.allocator) catch {
+                    Debug.server.err("Build failed with exit code: {}", .{term.Exited});
+                    return;
+                };
+                defer walker.deinit();
+
+                while (walker.next() catch null) |entry| {
+                    if (entry.kind == .file and Mem.eql(u8, entry.basename, "server.exe")) {
+                        var path_buf: [Fs.max_path_bytes]u8 = undefined;
+                        const full_path = Fmt.bufPrint(&path_buf, ".zig-cache/o/{s}", .{entry.path}) catch continue;
+                        const file = Fs.cwd().openFile(full_path, .{}) catch continue;
+                        defer file.close();
+                        const stat = file.stat() catch continue;
+                        if (stat.mtime > build_start_time) {
+                            found_new_exe = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (found_new_exe) {
+                    Debug.server.success("Build completed (copy faied, but exe built)", .{});
+                    self.last_build_failed = false;
+                    self.last_server_mtime = Time.timestamp();
+                    Debug.server.info("Restarting server...", .{});
+                    Process.restartSelf(self.allocator) catch |err| {
+                        Debug.server.err("Failed to restart: {}", .{err});
+                    };
+                } else {
+                    Debug.server.err("Build failed with exit code: {}", .{term.Exited});
+                }
+            } else {
+                Debug.server.err("Build failed with exit code: {}", .{term.Exited});
+                if (builtin.target.os.tag == .windows) {
+                    self.last_build_failed = true;
+                }
+            }
         }
     }
 };
@@ -308,9 +375,9 @@ pub const Server = struct {
         const address = try Net.Address.parseIp4(HOST, PORT);
         var server = try address.listen(.{ .reuse_address = true });
 
-        Debug.server.info("🚀 Zig HTTP Server running at {s}", .{URL});
-        Debug.server.info("📁 Serving files from current directory", .{});
-        Debug.server.info("🛑 Press Ctrl+C to stop", .{});
+        Debug.server.info("Zig HTTP Server running at {s}", .{URL});
+        Debug.server.info("Serving files from current directory", .{});
+        Debug.server.info("Press Ctrl+C to stop", .{});
 
         const open_cmd = switch (builtin.target.os.tag) {
             .macos => &[_][]const u8{ "open", URL },
@@ -322,12 +389,12 @@ pub const Server = struct {
 
         while (true) {
             const connection = server.accept() catch |err| {
-                Debug.server.err("❌ Error accepting connection: {}", .{err});
+                Debug.server.err("Error accepting connection: {}", .{err});
                 continue;
             };
 
             self.handleConnection(connection) catch |err| {
-                Debug.server.err("❌ Error handling connection: {}", .{err});
+                Debug.server.err("Error handling connection: {}", .{err});
             };
         }
 
@@ -341,7 +408,7 @@ pub const Server = struct {
         var http_server = Http.Server.init(connection, &buffer);
 
         var request = http_server.receiveHead() catch |err| {
-            Debug.server.err("❌ Error receiving request head: {}", .{err});
+            Debug.server.err("Error receiving request head: {}", .{err});
             return;
         };
 
@@ -355,7 +422,7 @@ pub const Server = struct {
 
         // Only log non-HEAD requests
         if (request.head.method != .HEAD) {
-            Debug.server.info("📨 {any} {s}", .{ request.head.method, target });
+            Debug.server.info("{any} {s}", .{ request.head.method, target });
         }
 
         // Route handling with cleaned target
@@ -379,18 +446,25 @@ pub const Server = struct {
     fn serveWasm(allocator: Mem.Allocator, request: *Http.Server.Request) !void {
         var exe_dir_path_buf: [Fs.max_path_bytes]u8 = undefined;
         const exe_dir_path = Fs.selfExeDirPath(&exe_dir_path_buf) catch {
-            Debug.server.err("❌ Failed to get executable directory", .{});
+            Debug.server.err("Failed to get executable directory", .{});
             try serve404(request);
             return;
         };
 
         var wasm_path_buf: [Fs.max_path_bytes]u8 = undefined;
-        const wasm_path = try FsPath.join(&wasm_path_buf, &.{ exe_dir_path, "star.wasm" });
+        var wasm_path = try FsPath.join(&wasm_path_buf, &.{ exe_dir_path, "star.wasm" });
 
-        const wasm_data = Fs.cwd().readFileAlloc(allocator, wasm_path, 10_000_000) catch |err| {
-            Debug.server.err("❌ Failed to read WASM file: {}", .{err});
-            try serve404(request);
-            return;
+        // Try to read from exe directory first, if not found try build output dir
+        const wasm_data = Fs.cwd().readFileAlloc(allocator, wasm_path, 10_000_000) catch blk: {
+            // Try debug/star-win or release/star-win
+            const build_dir = if (builtin.mode == .Debug) "debug" else "release";
+            wasm_path = try Fmt.bufPrint(&wasm_path_buf, "{s}/star-win/star.wasm", .{build_dir});
+
+            break :blk Fs.cwd().readFileAlloc(allocator, wasm_path, 10_000_000) catch |err| {
+                Debug.server.err("Failed to read WASM file: {}", .{err});
+                try serve404(request);
+                return;
+            };
         };
         defer allocator.free(wasm_data);
 

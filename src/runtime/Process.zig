@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 const Debug = @import("Debug.zig");
 const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
+const Fmt = @import("Fmt.zig");
 const Fs = @import("Fs.zig");
 const Heap = @import("Heap.zig");
 const Mem = @import("Mem.zig");
@@ -62,13 +63,41 @@ pub fn restartSelf(allocator: Mem.Allocator) !void {
     const argv = argv_strings[0..argv_buffers.len];
 
     if (comptime builtin.target.os.tag == .windows) {
-        Debug.default.warn("TODO: Auto-restart may not be supported on this platform", .{});
+        // Find the NEW server.exe in .zig-cache
+        var newest_exe_path: [Fs.max_path_bytes]u8 = undefined;
+        var newest_exe: []const u8 = exe_path; // Default to old exe
+        var newest_mtime: i128 = 0;
 
-        // Windows: spawn new process then exit
-        var child = Child.init(argv, allocator);
+        var cache_dir = Fs.cwd().openDir(".zig-cache/o", .{ .iterate = true }) catch {
+            // No cache dir, use old exe
+            var child = Child.init(argv, allocator);
+            try child.spawn();
+            process.exit(0);
+        };
+        defer cache_dir.close();
+
+        var iter = cache_dir.iterate();
+        while (try iter.next()) |entry| {
+            if (entry.kind == .directory) {
+                var sub_dir = cache_dir.openDir(entry.name, .{}) catch continue;
+                defer sub_dir.close();
+
+                const file = sub_dir.openFile("server.exe", .{}) catch continue;
+                defer file.close();
+
+                const stat = file.stat() catch continue;
+                if (stat.mtime > newest_mtime) {
+                    newest_mtime = stat.mtime;
+                    const path = Fmt.bufPrint(&newest_exe_path, ".zig-cache/o/{s}/server.exe", .{entry.name}) catch continue;
+                    newest_exe = path;
+                }
+            }
+        }
+
+        // Start the newest exe found
+        argv_strings[0] = newest_exe;
+        var child = Child.init(argv_strings[0..argv_buffers.len], allocator);
         try child.spawn();
-
-        // Exit current process
         process.exit(0);
     } else {
         // Unix: replace current process

@@ -9,6 +9,7 @@ pub const endsWith = mem.endsWith;
 pub const eql = mem.eql;
 pub const indexOf = mem.indexOf;
 pub const lastIndexOf = mem.lastIndexOf;
+pub const len = mem.len;
 pub const span = mem.span;
 
 const Debug = @import("Debug.zig");

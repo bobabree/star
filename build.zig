@@ -112,12 +112,21 @@ const PlatformType = enum {
 
     pub fn createPlatformArtifacts(comptime self: PlatformType, options: BuildOptions) void {
         const runtime_module = self.createRuntimeModule(options);
-        const wasm = self.createWasmArtifact(options, runtime_module);
-        const app = self.createAppArtifact(options, runtime_module);
-        const server = self.createServerArtifact(options, runtime_module);
 
-        self.setupPlatform(options, app, runtime_module);
-        self.installArtifacts(options, app, wasm, server);
+        const wasm_runtime = PlatformType.wasm.createRuntimeModule(options);
+        const wasm = self.createWasmArtifact(options, wasm_runtime);
+        self.installArtifact(options, wasm);
+
+        if (!self.isWasm()) {
+            // Native platforms use their own runtime module
+            const app = self.createNativeArtifact("src/app.zig", "star", options, runtime_module);
+            self.setupPlatform(options, app, runtime_module);
+            self.installArtifact(options, app);
+
+            const server = self.createNativeArtifact("src/server.zig", "server", options, runtime_module);
+            self.setupPlatform(options, server, runtime_module);
+            self.installArtifact(options, server);
+        }
     }
 
     pub fn createModuleOptions(
@@ -188,37 +197,18 @@ const PlatformType = enum {
         };
     }
 
-    pub fn createAppArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
+    pub fn createNativeArtifact(comptime self: PlatformType, file: []const u8, name: []const u8, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
         const exe_module = options.b.createModule(self.createModuleOptions(
             options.b,
-            options.b.path("src/app.zig"),
+            options.b.path(file),
             options.optimize,
         ));
         exe_module.addImport("runtime", runtime_module);
-        const exe = options.b.addExecutable(.{ .name = "star", .root_module = exe_module });
+        const exe = options.b.addExecutable(.{ .name = name, .root_module = exe_module });
         if (self.useStatic()) {
             exe.linkage = .static;
         }
         return exe;
-    }
-
-    pub fn createServerArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) ?*std.Build.Step.Compile {
-        if (self.isWasm()) return null;
-
-        const server_module = options.b.createModule(self.createModuleOptions(
-            options.b,
-            options.b.path("src/server.zig"),
-            options.optimize,
-        ));
-        server_module.addImport("runtime", runtime_module);
-        const server = options.b.addExecutable(.{ .name = "server", .root_module = server_module });
-        if (self.useStatic()) {
-            server.linkage = .static;
-        }
-        if (self.isWindows()) {
-            self.linkWindowsLibs(server);
-        }
-        return server;
     }
 
     pub fn createWasmArtifact(comptime self: PlatformType, options: BuildOptions, runtime_module: *std.Build.Module) *std.Build.Step.Compile {
@@ -283,23 +273,28 @@ const PlatformType = enum {
         return wasm;
     }
 
-    pub fn setupPlatform(comptime self: PlatformType, options: BuildOptions, server: *std.Build.Step.Compile, runtime_module: *std.Build.Module) void {
+    pub fn setupPlatform(comptime self: PlatformType, options: BuildOptions, artifact: *std.Build.Step.Compile, runtime_module: *std.Build.Module) void {
         if (self.isIOS()) {
-            self.setupIOS(options, server);
+            self.setupIOS(options, artifact);
             return;
         }
 
         if (self.isWindows()) {
-            self.linkWindowsLibs(server);
+            self.linkWindowsLibs(artifact);
         }
 
         if (self.isCurrentPlatform()) {
-            self.setupTests(options, server, runtime_module);
+            self.setupTests(options, artifact, runtime_module);
         }
     }
 
     fn setupIOS(comptime self: PlatformType, options: BuildOptions, server: *std.Build.Step.Compile) void {
         _ = self;
+        if (builtin.target.os.tag != .macos) {
+            std.log.warn("Skipping iOS build - requires macOS", .{});
+            return;
+        }
+
         var sdk_path: []const u8 = undefined;
         if (options.b.sysroot) |sysroot| {
             sdk_path = sysroot;
@@ -338,41 +333,33 @@ const PlatformType = enum {
         }
     }
 
-    fn linkWindowsLibs(comptime self: PlatformType, server: *std.Build.Step.Compile) void {
+    fn linkWindowsLibs(comptime self: PlatformType, artifact: *std.Build.Step.Compile) void {
         _ = self;
         const libs = &[_][]const u8{ "ws2_32", "kernel32", "ntdll", "crypt32", "advapi32" };
         for (libs) |lib| {
-            server.linkSystemLibrary(lib);
+            artifact.linkSystemLibrary(lib);
         }
     }
 
-    fn setupTests(comptime self: PlatformType, options: BuildOptions, server: *std.Build.Step.Compile, runtime_module: *std.Build.Module) void {
+    fn setupTests(comptime self: PlatformType, options: BuildOptions, artifact: *std.Build.Step.Compile, runtime_module: *std.Build.Module) void {
         const test_exe = options.b.addTest(.{ .root_module = runtime_module });
         if (self.isWindows()) {
-            self.linkWindowsLibs(server);
+            self.linkWindowsLibs(artifact);
             self.linkWindowsLibs(test_exe);
         }
         const test_install = options.b.addRunArtifact(test_exe);
         options.test_step.dependOn(&test_install.step);
     }
 
-    pub fn installArtifacts(comptime self: PlatformType, options: BuildOptions, app: *std.Build.Step.Compile, wasm: *std.Build.Step.Compile, server: ?*std.Build.Step.Compile) void {
-        if (self.isIOS()) return;
+    pub fn installArtifact(comptime self: PlatformType, options: BuildOptions, artifact: *std.Build.Step.Compile) void {
+        if (self.isIOS()) return; // iOS install handled in setupIOS
 
-        // Install app
-        const primary_artifact = if (self.isWasm()) wasm else app;
-        self.installNativePlatform(options, primary_artifact);
-
-        // Install server if it exists
-        if (server) |s| {
-            const server_install = options.b.addInstallArtifact(s, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
-            if (options.install_step) |step| {
-                step.dependOn(&server_install.step);
-            }
+        // Install the primary artifact for this platform
+        if (self.isWasm()) {
+            self.installWasmPlatform(options, artifact);
+        } else {
+            self.installNativePlatform(options, artifact);
         }
-
-        // Process wasm
-        self.installWasmPlatform(options, wasm, primary_artifact);
     }
 
     fn installNativePlatform(comptime self: PlatformType, options: BuildOptions, artifact: *std.Build.Step.Compile) void {
@@ -383,12 +370,8 @@ const PlatformType = enum {
         }
     }
 
-    fn installWasmPlatform(comptime self: PlatformType, options: BuildOptions, wasm: *std.Build.Step.Compile, primary_artifact: *std.Build.Step.Compile) void {
-        const wasm_install = if (self.isWasm())
-            options.b.addInstallArtifact(primary_artifact, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } })
-        else
-            options.b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
-
+    fn installWasmPlatform(comptime self: PlatformType, options: BuildOptions, artifact: *std.Build.Step.Compile) void {
+        const wasm_install = options.b.addInstallArtifact(artifact, .{ .dest_dir = .{ .override = .{ .custom = options.folder_name } } });
         const optimized_wasm = self.optimizeWasm(options, &wasm_install.step);
 
         if (options.install_step) |step| {
@@ -407,6 +390,11 @@ const PlatformType = enum {
             return wasm_install;
         }
 
+        // Check if wasm-opt exists
+        const check_wasm_opt = options.b.addSystemCommand(&.{ "which", "wasm-opt" });
+        check_wasm_opt.failing_to_execute_foreign_is_an_error = false;
+
+        // Try to run wasm-opt
         const cmd = options.b.addSystemCommand(&.{
             "wasm-opt",
             options.b.getInstallPath(.{ .custom = options.folder_name }, "star.wasm"),
@@ -418,7 +406,48 @@ const PlatformType = enum {
         });
         cmd.step.dependOn(wasm_install);
         cmd.failing_to_execute_foreign_is_an_error = false;
-        return &cmd.step;
+
+        // Create a custom step that logs warning if wasm-opt fails
+        const WarnStep = struct {
+            step: std.Build.Step,
+
+            pub fn create(b: *std.Build) *@This() {
+                const s = b.allocator.create(@This()) catch @panic("OOM");
+                s.* = .{
+                    .step = std.Build.Step.init(.{
+                        .id = .custom,
+                        .name = "warn-wasm-opt",
+                        .owner = b,
+                        .makeFn = make,
+                    }),
+                };
+                return s;
+            }
+
+            fn make(s: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
+                _ = s;
+                std.log.warn("\n" ++
+                    "========================================\n" ++
+                    "WARNING: wasm-opt not found or failed!\n" ++
+                    "========================================\n" ++
+                    "To install wasm-opt:\n" ++
+                    "  macOS:   brew install binaryen\n" ++
+                    "  Linux:   npm install -g wasm-opt\n" ++
+                    "  Windows: npm install -g wasm-opt\n" ++
+                    "  Or download from: https://github.com/WebAssembly/binaryen/releases\n" ++
+                    "\n" ++
+                    "IMPORTANT: Do NOT commit release builds without wasm-opt!\n" ++
+                    "The WASM file will be ~3x larger without optimization.\n" ++
+                    "========================================\n", .{});
+            }
+        };
+
+        // If wasm-opt fails, show warning but continue
+        const warn_step = WarnStep.create(options.b);
+        warn_step.step.dependOn(&cmd.step);
+
+        // Return the original wasm_install so build continues even if wasm-opt fails
+        return wasm_install;
     }
 
     fn embedWasmInHtml(comptime self: PlatformType, options: BuildOptions, optimized_wasm: *std.Build.Step) void {
@@ -469,13 +498,46 @@ const PlatformType = enum {
         embed.step.dependOn(optimized_wasm);
 
         if (options.optimize != .Debug) {
-            const copy_to_docs = options.b.addSystemCommand(&.{
-                "cp",
-                options.b.getInstallPath(.{ .custom = options.folder_name }, "index.html"),
-                "docs/index.html",
-            });
-            copy_to_docs.step.dependOn(&embed.step);
-            options.install_step.?.dependOn(&copy_to_docs.step);
+            const CopyStep = struct {
+                step: std.Build.Step,
+                source: []const u8,
+                dest: []const u8,
+
+                pub fn create(builder: *std.Build, source: []const u8, dest: []const u8) *@This() {
+                    const s = builder.allocator.create(@This()) catch @panic("OOM");
+                    s.* = .{
+                        .step = std.Build.Step.init(.{
+                            .id = .custom,
+                            .name = "copy-to-docs",
+                            .owner = builder,
+                            .makeFn = make,
+                        }),
+                        .source = builder.dupe(source),
+                        .dest = builder.dupe(dest),
+                    };
+                    return s;
+                }
+
+                fn make(s: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
+                    const cs: *@This() = @fieldParentPtr("step", s);
+                    const source_file = readFile(s.owner.allocator, cs.source, 10_000_000) orelse {
+                        return error.FailedToReadSource;
+                    };
+                    defer s.owner.allocator.free(source_file);
+
+                    // Ensure docs directory exists
+                    std.fs.cwd().makePath("docs") catch |err| {
+                        std.log.err("Failed to create docs directory: {}", .{err});
+                        return err;
+                    };
+
+                    writeFile(cs.dest, source_file);
+                }
+            };
+
+            const copy_step = CopyStep.create(options.b, options.b.getInstallPath(.{ .custom = options.folder_name }, "index.html"), "docs/index.html");
+            copy_step.step.dependOn(&embed.step);
+            options.install_step.?.dependOn(&copy_step.step);
         } else {
             options.install_step.?.dependOn(&embed.step);
         }
@@ -522,12 +584,18 @@ fn pipeThrough(allocator: std.mem.Allocator, argv: []const []const u8, input: []
     child.stdout_behavior = .Pipe;
 
     child.spawn() catch |err| {
-        std.log.err("Failed to spawn {s}: {}\n", .{ argv[0], err });
+        // Only log error if it's not one of the optional tools
+        const is_optional_tool = std.mem.eql(u8, argv[0], "html-minifier-terser") or
+            std.mem.eql(u8, argv[0], "wasm-opt");
+        if (!is_optional_tool) {
+            std.log.err("Failed to spawn {s}: {}\n", .{ argv[0], err });
+        }
         return null;
     };
 
     child.stdin.?.writeAll(input) catch |err| {
         std.log.err("Failed to write to {s}: {}\n", .{ argv[0], err });
+        return null;
     };
     child.stdin.?.close();
 
@@ -551,7 +619,6 @@ fn compressLib(b: *std.Build, lib_content: []const u8) []const u8 {
 
     return b.allocator.dupe(u8, compressed.items) catch @panic("OOM");
 }
-
 fn prepareHtml(b: *std.Build, wasm_path: []const u8, output_path: []const u8, embed_wasm: bool) void {
     const html = @embedFile("src/web/index.html");
     const js_lib_obj = @embedFile("src/web/js.o");
@@ -595,6 +662,17 @@ fn prepareHtml(b: *std.Build, wasm_path: []const u8, output_path: []const u8, em
         "--remove-style-link-type-attributes",
         "--use-short-doctype",
     }, final) orelse {
+        std.log.warn("\n" ++
+            "========================================\n" ++
+            "WARNING: html-minifier-terser not found or failed!\n" ++
+            "========================================\n" ++
+            "To install html-minifier-terser:\n" ++
+            "  All platforms: npm install -g html-minifier-terser\n" ++
+            "\n" ++
+            "IMPORTANT: Do NOT commit release builds without minification!\n" ++
+            "The HTML file will be larger without optimization.\n" ++
+            "Falling back to unminified HTML.\n" ++
+            "========================================\n", .{});
         writeFile(output_path, final);
         return;
     };

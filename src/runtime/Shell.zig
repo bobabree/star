@@ -37,7 +37,18 @@ pub const Shell = enum {
         }
     }
 
+    var skip_next: bool = false;
+
     fn executeCommand(comptime self: Shell, cmd: []const u8) void {
+        // Windows sends everything twice, skip every other call
+        if (comptime self == .windows) {
+            if (skip_next) {
+                skip_next = false;
+                return;
+            }
+            skip_next = true;
+        }
+
         if (Mem.eql(u8, cmd, "ls")) {
             IO.stdio.out.send("star.wasm  index.html");
         } else if (Mem.eql(u8, cmd, "clear")) {

@@ -8,6 +8,12 @@
 # Custom
 .ignore
 
+# Generated files
+src/web/index.min.html
+
+# Owner-only
+docs/index.html
+
 # Zig
 .zig-cache/
 zig-out/
