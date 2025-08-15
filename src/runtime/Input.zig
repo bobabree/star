@@ -6,6 +6,23 @@ const OS = @import("OS.zig");
 const Posix = @import("Posix.zig");
 const Thread = @import("Thread.zig");
 
+pub const ASCII = struct {
+    pub const BACKSPACE_ALT = 8;
+    pub const TAB = 9;
+    pub const NEWLINE = 10;
+    pub const ENTER = 13;
+    pub const ESCAPE = 27;
+    pub const SPACE = 32;
+    pub const DEL = 127;
+    pub const BACKSPACE = 127;
+
+    // Control keys
+    pub const CTRL_C = 3;
+    pub const CTRL_D = 4;
+    pub const CTRL_L = 12;
+    pub const CTRL_Z = 26;
+};
+
 var registered_channels: [16]*Channel.DefaultChannel = undefined;
 var channel_count: usize = 0;
 

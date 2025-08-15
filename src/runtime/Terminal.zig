@@ -9,11 +9,12 @@ const OS = @import("OS.zig");
 const Posix = @import("Posix.zig");
 const Thread = @import("Thread.zig");
 const Time = @import("Time.zig");
+const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 const Wasm = @import("Wasm.zig");
 
-var input_buffer: [256]u8 = undefined;
-var input_len: usize = 0;
-var is_initialized: bool = false;
+const ASCII = Input.ASCII;
+
+var input_buffer = Utf8Buffer(256).init();
 var input_channel = Channel.DefaultChannel{};
 
 // Native terminal state (for non-wasm platforms)
@@ -29,11 +30,6 @@ pub const Terminal = enum {
     ios,
 
     pub fn init(comptime self: Terminal) void {
-        if (is_initialized) return;
-        is_initialized = true;
-        input_len = 0;
-        @memset(&input_buffer, 0);
-
         // Register callbacks
         input_channel.onSend(struct {
             fn callback() void {
@@ -99,46 +95,44 @@ pub const Terminal = enum {
                 const char_opt: ?u8 = switch (event) {
                     .key => |k| k,
                     .special => |s| switch (s) {
-                        .enter => @as(u8, 13),
-                        .backspace => @as(u8, 127),
-                        .tab => @as(u8, 9),
-                        .escape => @as(u8, 27),
+                        .enter => @as(u8, ASCII.ENTER),
+                        .backspace => @as(u8, ASCII.BACKSPACE),
+                        .tab => @as(u8, ASCII.TAB),
+                        .escape => @as(u8, ASCII.ESCAPE),
                         else => null,
                     },
                     .ctrl_key => |k| switch (k) {
-                        .ctrl_c => @as(u8, 3),
-                        .ctrl_d => @as(u8, 4),
-                        .ctrl_z => @as(u8, 26),
-                        .ctrl_l => @as(u8, 12),
+                        .ctrl_c => @as(u8, ASCII.CTRL_C),
+                        .ctrl_d => @as(u8, ASCII.CTRL_D),
+                        .ctrl_z => @as(u8, ASCII.CTRL_Z),
+                        .ctrl_l => @as(u8, ASCII.CTRL_L),
                     },
                     else => null,
                 };
 
                 const char = char_opt orelse continue;
 
-                if (char == 13) { // Enter
-                    const cmd = input_buffer[0..input_len];
-                    input_len = 0;
+                if (char == ASCII.ENTER) {
+                    const cmd = input_buffer.constSlice(); // Get the buffer content
+                    input_buffer.clear();
 
-                    // Since callbacks are synchronous,
-                    // write output BEFORE send() for it to appear first.
                     switch (self) {
                         .wasm => self.write("\r\n"),
                         else => {},
                     }
 
                     IO.stdio.in.send(cmd);
-                } else if (char == 127 or char == 8) { // Backspace
-                    if (input_len > 0) {
-                        input_len -= 1;
+                } else if (char == ASCII.BACKSPACE or char == ASCII.BACKSPACE_ALT) {
+                    if (input_buffer.len() > 0) {
+                        input_buffer.removeAt(input_buffer.len() - 1); // Remove last char
                         switch (self) {
                             .wasm => self.write("\x08 \x08"),
                             else => {},
                         }
                     }
-                } else if (input_len < 255) {
-                    input_buffer[input_len] = char;
-                    input_len += 1;
+                } else if (input_buffer.constSlice().len < 255) { // Check byte length
+                    var char_bytes = [1]u8{char};
+                    input_buffer.appendSlice(&char_bytes);
                     switch (self) {
                         .wasm => {
                             var echo: [1]u8 = .{char};

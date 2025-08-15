@@ -85,7 +85,6 @@ pub const FileSys = enum {
         is_initialized = true;
 
         fs_data = FileSysData.init();
-        Debug.default.info("FileSys initialized", .{});
     }
 
     pub fn run(comptime self: FileSys) void {

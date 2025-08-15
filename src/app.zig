@@ -81,6 +81,7 @@ const App = enum {
         {
             input.init();
             input.register(terminal);
+            input.register(shell);
             input.run();
         }
     }

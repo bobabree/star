@@ -5,7 +5,10 @@ const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
 const Wasm = @import("Wasm.zig");
 
-const Thread = if (OS.is_wasm) WasmThread else thread;
+pub const Id = thread.Id;
+pub const getCurrentId = thread.getCurrentId;
+pub const yield = thread.yield;
+pub const Thread = if (OS.is_wasm) WasmThread else thread;
 const SpawnConfig = thread.SpawnConfig;
 const SpawnError = thread.SpawnError;
 

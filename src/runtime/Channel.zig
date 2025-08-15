@@ -1,4 +1,6 @@
 const Atomic = @import("Atomic.zig");
+const Testing = @import("Testing.zig");
+const Thread = @import("Thread.zig");
 
 pub const MESSAGE_SIZE = 256;
 pub const QUEUE_SIZE = 32;
@@ -57,3 +59,66 @@ pub fn Channel(comptime capacity: usize) type {
 }
 
 pub const DefaultChannel = Channel(QUEUE_SIZE);
+
+test "Channel data is thread-safe" {
+    var test_channel = DefaultChannel{};
+
+    // Spawn sender thread
+    const thread = try Thread.spawn(.{}, struct {
+        fn sender(ch: *DefaultChannel) void {
+            const data = [_]u8{42};
+            for (0..100) |_| {
+                while (!ch.send(&data)) {
+                    // Channel full, yield
+                    Thread.sleep(1000); // Sleep 1 microsecond instead of yield
+                }
+            }
+        }
+    }.sender, .{&test_channel});
+
+    // Receive messages while sender is running
+    var received_count: usize = 0;
+    while (received_count < 100) {
+        if (test_channel.recv()) |_| {
+            received_count += 1;
+        } else {
+            Thread.sleep(1000); // Give sender time to produce
+        }
+    }
+
+    thread.join();
+
+    try Testing.expect(received_count == 100);
+}
+
+test "Channel callbacks run in sender's thread" {
+    const G = struct {
+        var callback_thread_id: Thread.Id = undefined;
+        var callback_fired: bool = false;
+    };
+
+    var test_channel = DefaultChannel{};
+    const main_thread_id = Thread.getCurrentId();
+
+    // Register callback
+    test_channel.onSend(struct {
+        fn callback() void {
+            G.callback_thread_id = Thread.getCurrentId();
+            G.callback_fired = true;
+        }
+    }.callback);
+
+    // Send from another thread
+    const thread = try Thread.spawn(.{}, struct {
+        fn sendFromThread(ch: *DefaultChannel) void {
+            const data = [_]u8{42};
+            _ = ch.send(&data);
+        }
+    }.sendFromThread, .{&test_channel});
+
+    thread.join();
+
+    // Verify callback fired and check thread
+    try Testing.expect(G.callback_fired);
+    try Testing.expect(G.callback_thread_id != main_thread_id);
+}
