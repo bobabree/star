@@ -81,7 +81,7 @@ pub const Shell = enum {
     }
 
     fn processRawInput(comptime self: Shell) void {
-        _ = self;
+        if (self != .wasm) return;
 
         while (input_channel.recv()) |data| {
             if (data.len > 0) {
