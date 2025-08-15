@@ -270,6 +270,20 @@
                 }
             }
             loadWasm();
+
+            try {
+                const req = indexedDB.open('test');
+                req.onsuccess = () => {
+                    document.getElementById('idb-status').textContent = '✅';
+                    req.result.close();
+                };
+                req.onerror = () => {
+                    document.getElementById('idb-status').textContent = '❌';
+                };
+            } catch(e) {
+                document.getElementById('idb-status').textContent = '❌';
+            }
         </script>
+        <pre id="idb-status" style="position:fixed;top:0;left:0;margin:0">⏳</pre>
     </body>
 </html>
