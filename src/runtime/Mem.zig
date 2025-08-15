@@ -11,6 +11,8 @@ pub const indexOf = mem.indexOf;
 pub const lastIndexOf = mem.lastIndexOf;
 pub const len = mem.len;
 pub const span = mem.span;
+pub const startsWith = mem.startsWith;
+pub const trim = mem.trim;
 
 const Debug = @import("Debug.zig");
 

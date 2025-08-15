@@ -3,6 +3,7 @@ const runtime = @import("runtime.zig");
 const Allocator = runtime.Mem.Allocator;
 const ArgsBuffer = runtime.Process.ArgsBuffer;
 const Debug = runtime.Debug;
+const Fs = runtime.Fs;
 const Heap = runtime.Heap;
 const Mem = runtime.Mem;
 const OS = runtime.OS;
@@ -13,6 +14,7 @@ const Time = runtime.Time;
 const Wasm = runtime.Wasm;
 const builtin = runtime.builtin;
 
+const fileSys = runtime.Fs.fileSys;
 const input = runtime.Input.input;
 const shell = runtime.Shell.shell;
 const terminal = runtime.Terminal.terminal;
@@ -59,6 +61,11 @@ const App = enum {
                 Debug.ios.success("Hello World from Zig iOS!", .{});
             },
             .macos, .linux, .windows => {},
+        }
+
+        {
+            fileSys.init();
+            fileSys.run();
         }
 
         {
