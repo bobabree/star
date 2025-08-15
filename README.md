@@ -4,8 +4,6 @@
 
 Star aims to be a build system and package manager like npm/cargo but for C/C++/Zig - a simple package manager for native code across all platforms.
 
-***[Star also provides an ultra-lightweight (<1MB) portable OS](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to native systems.***
-
 ```shell
 # C++ JSON library [WIP]
 star install "nlohmann/json/3.11.3"    
@@ -17,6 +15,9 @@ star install "ziglang/zig/0.14.1"
 # Build the 3 above [WIP]
 star build                             
 ```
+
+***[(Demo Only) Star also provides an ultra-lightweight (<1MB) portable OS](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to native systems.***
+
 
 ## Platform Support
 
