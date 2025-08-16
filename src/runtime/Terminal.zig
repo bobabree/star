@@ -78,7 +78,6 @@ pub const Terminal = enum {
                 new_mode.lflag.ECHO = false;
                 new_mode.lflag.ICANON = false;
                 new_mode.lflag.ISIG = false; // ctrl +C
-                //new_mode.lflag.ISIG = false; // TODO: isable signal generation
                 new_mode.cc[@intFromEnum(OS.posix.V.MIN)] = 1;
                 new_mode.cc[@intFromEnum(OS.posix.V.TIME)] = 0;
 
@@ -88,11 +87,51 @@ pub const Terminal = enum {
                 };
             },
             .windows => {
-                // TODO: Implement Windows terminal configuration
-                // Need to:
-                // 1. GetConsoleMode to save original
-                // 2. SetConsoleMode to disable line buffering
-                // 3. Enable virtual terminal processing for ANSI colors
+                // Windows console mode constants
+                const ENABLE_ECHO_INPUT: OS.windows.DWORD = 0x0004;
+                const ENABLE_LINE_INPUT: OS.windows.DWORD = 0x0002;
+                const ENABLE_PROCESSED_INPUT: OS.windows.DWORD = 0x0001;
+                const ENABLE_VIRTUAL_TERMINAL_INPUT: OS.windows.DWORD = 0x0200;
+                const ENABLE_PROCESSED_OUTPUT: OS.windows.DWORD = 0x0001;
+                const ENABLE_VIRTUAL_TERMINAL_PROCESSING: OS.windows.DWORD = 0x0004;
+
+                const stdin_handle = OS.windows.GetStdHandle(OS.windows.STD_INPUT_HANDLE) catch |err| {
+                    Debug.default.warn("Failed to get stdin handle: {}", .{err});
+                    return;
+                };
+
+                // get curr console mode
+                original_mode = 0;
+                if (OS.windows.kernel32.GetConsoleMode(stdin_handle, &original_mode) == 0) {
+                    const err = OS.windows.kernel32.GetLastError();
+                    Debug.default.warn("GetConsoleMode failed with error code: {d} (0x{X:0>8})", .{ err, err });
+                    return;
+                }
+
+                // set new console mode
+                var new_mode = original_mode;
+                new_mode &= ~@as(OS.windows.DWORD, ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
+                new_mode |= ENABLE_PROCESSED_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
+
+                if (OS.windows.kernel32.SetConsoleMode(stdin_handle, new_mode) == 0) {
+                    const err = OS.windows.kernel32.GetLastError();
+                    Debug.default.warn("SetConsoleMode failed with error code: {d} (0x{X:0>8})", .{ err, err });
+                    return;
+                }
+
+                // Enable ANSI output for stderr (for colored output)
+                const stderr_handle = OS.windows.GetStdHandle(OS.windows.STD_ERROR_HANDLE) catch |err| {
+                    Debug.default.warn("Failed to get stderr handle: {}", .{err});
+                    return;
+                };
+
+                var stderr_mode: OS.windows.DWORD = 0;
+                if (OS.windows.kernel32.GetConsoleMode(stderr_handle, &stderr_mode) == 0) {
+                    return;
+                }
+
+                stderr_mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT;
+                _ = OS.windows.kernel32.SetConsoleMode(stderr_handle, stderr_mode);
             },
             else => {},
         }
@@ -116,6 +155,24 @@ pub const Terminal = enum {
                 };
             }
             Thread.sleep(1_000_000);
+        }
+    }
+
+    pub fn cleanup(comptime self: Terminal) void {
+        switch (self) {
+            .wasm => {
+                // No cleanup needed for WASM(?)
+            },
+            .macos, .linux => {
+                OS.posix.tcsetattr(OS.posix.STDIN_FILENO, .FLUSH, original_mode) catch {};
+            },
+            .windows => {
+                const stdin_handle = OS.windows.GetStdHandle(OS.windows.STD_INPUT_HANDLE) catch return;
+                _ = OS.windows.kernel32.SetConsoleMode(stdin_handle, original_mode);
+            },
+            .ios => {
+                // TODO: iOS cleanup if needed
+            },
         }
     }
 

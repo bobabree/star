@@ -107,16 +107,7 @@ pub const Shell = enum {
         }
     }
 
-    var skip_next: bool = false;
     fn processCommand(comptime self: Shell, cmd: []const u8) void {
-        if (comptime self == .windows) {
-            if (skip_next) {
-                skip_next = false;
-                return;
-            }
-            skip_next = true;
-        }
-
         const input_cmd = ShellCmd.parse(cmd);
         input_cmd.execute(cmd);
 

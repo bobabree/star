@@ -135,16 +135,18 @@ else switch (builtin.target.os.tag) {
     else => @compileError("Unsupported app platform: " ++ @tagName(builtin.target.os.tag)),
 };
 
+// Transparent cleanup
 fn cleanup() void {
+    // Cleanup input handlers
+    input.cleanup();
+
     // Restore terminal settings
-    // TODO: consider moving to Terminal.zig
-    if (builtin.target.os.tag == .macos or builtin.target.os.tag == .linux) {
-        OS.posix.tcsetattr(OS.posix.STDIN_FILENO, .FLUSH, Terminal.original_mode) catch {};
-    }
+    terminal.cleanup();
 }
 
 pub fn main() !void {
     defer cleanup();
+
     switch (comptime app) {
         inline else => |a| {
             a.init();

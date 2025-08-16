@@ -46,7 +46,7 @@ const MAX_ARG_LEN = 256;
 
 pub const ArgsBuffer = FixedBuffer(Utf8Buffer(MAX_ARG_LEN), MAX_ARGS);
 
-pub fn restartSelf(allocator: Mem.Allocator) !void {
+pub fn restartSelf(allocator: Mem.Allocator, exe_name: []const u8) !void {
     // Get current executable path
     var exe_path_buf: [Fs.max_path_bytes]u8 = undefined;
     const exe_path = try Fs.selfExePath(&exe_path_buf);
@@ -63,40 +63,55 @@ pub fn restartSelf(allocator: Mem.Allocator) !void {
     const argv = argv_strings[0..argv_buffers.len];
 
     if (comptime builtin.target.os.tag == .windows) {
-        // Find the NEW server.exe in .zig-cache
+        // Find the NEW exe in .zig-cache
         var newest_exe_path: [Fs.max_path_bytes]u8 = undefined;
-        var newest_exe: []const u8 = exe_path; // Default to old exe
+        var newest_exe: []const u8 = exe_path;
         var newest_mtime: i128 = 0;
 
-        var cache_dir = Fs.cwd().openDir(".zig-cache/o", .{ .iterate = true }) catch {
-            // No cache dir, use old exe
+        var cache_dir = Fs.cwd().openDir(".zig-cache/o", .{ .iterate = true }) catch |err| {
+            Debug.server.warn("No cache dir, using current exe: {}", .{err});
             var child = Child.init(argv, allocator);
             try child.spawn();
             process.exit(0);
         };
         defer cache_dir.close();
 
-        var iter = cache_dir.iterate();
-        while (try iter.next()) |entry| {
-            if (entry.kind == .directory) {
-                var sub_dir = cache_dir.openDir(entry.name, .{}) catch continue;
-                defer sub_dir.close();
+        var walker = cache_dir.walk(allocator) catch |err| {
+            Debug.server.err("Failed to walk cache dir: {}", .{err});
+            var child = Child.init(argv, allocator);
+            try child.spawn();
+            process.exit(0);
+        };
+        defer walker.deinit();
 
-                const file = sub_dir.openFile("server.exe", .{}) catch continue;
+        while (walker.next() catch null) |entry| {
+            if (entry.kind == .file and Mem.eql(u8, entry.basename, exe_name)) {
+                var temp_path: [Fs.max_path_bytes]u8 = undefined;
+                const full_path = Fmt.bufPrint(&temp_path, ".zig-cache/o/{s}", .{entry.path}) catch |err| {
+                    Debug.server.warn("Path too long for {s}: {}", .{ entry.path, err });
+                    continue;
+                };
+                const file = Fs.cwd().openFile(full_path, .{}) catch continue;
                 defer file.close();
-
                 const stat = file.stat() catch continue;
                 if (stat.mtime > newest_mtime) {
                     newest_mtime = stat.mtime;
-                    const path = Fmt.bufPrint(&newest_exe_path, ".zig-cache/o/{s}/server.exe", .{entry.name}) catch continue;
-                    newest_exe = path;
+                    @memcpy(newest_exe_path[0..full_path.len], full_path);
+                    newest_exe = newest_exe_path[0..full_path.len];
                 }
             }
         }
 
-        // Start the newest exe found
         argv_strings[0] = newest_exe;
-        var child = Child.init(argv_strings[0..argv_buffers.len], allocator);
+
+        var child: Child = undefined;
+        if (argv_buffers.len < MAX_ARGS) {
+            argv_strings[argv_buffers.len] = "--restarted";
+            child = Child.init(argv_strings[0 .. argv_buffers.len + 1], allocator);
+        } else {
+            child = Child.init(argv_strings[0..argv_buffers.len], allocator);
+        }
+
         try child.spawn();
         process.exit(0);
     } else {

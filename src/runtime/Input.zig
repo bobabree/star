@@ -35,6 +35,7 @@ var input_parser = InputParser{};
 
 // For native platforms
 var stdin_reader: ?Fs.File.Reader = null;
+var windows_ctrl_handler_installed = false;
 
 pub const InputEvent = union(enum) {
     key: u8,
@@ -134,9 +135,14 @@ pub const Input = enum {
     linux,
     windows,
 
-    pub fn init(comptime _: Input) void {
+    pub fn init(comptime self: Input) void {
         // Reset registration
         channel_count = 0;
+
+        // Windows-specific: Install Ctrl+C handler (boo Windows!)
+        if (self == .windows) {
+            installWindowsCtrlHandler();
+        }
     }
 
     pub fn register(comptime _: Input, component: anytype) void {
@@ -160,6 +166,48 @@ pub const Input = enum {
             .ios => {
                 // TODO: iOS event handling
             },
+        }
+    }
+
+    fn installWindowsCtrlHandler() void {
+        const CTRL_C_EVENT: OS.windows.DWORD = 0;
+
+        const ctrlHandler = struct {
+            fn handler(dwCtrlType: OS.windows.DWORD) callconv(.c) OS.windows.BOOL {
+                if (dwCtrlType == CTRL_C_EVENT) {
+                    // Send Ctrl+C as input event instead of terminating
+                    input.broadcast(.{ .ctrl_key = .ctrl_c });
+                    return 1; // TRUE = handled, don't terminate
+                }
+                return 0; // FALSE = not handled
+            }
+        }.handler;
+
+        const kernel32 = struct {
+            extern "kernel32" fn SetConsoleCtrlHandler(
+                HandlerRoutine: ?*const fn (dwCtrlType: OS.windows.DWORD) callconv(.c) OS.windows.BOOL,
+                Add: OS.windows.BOOL,
+            ) callconv(.c) OS.windows.BOOL;
+        };
+
+        if (kernel32.SetConsoleCtrlHandler(&ctrlHandler, 1) == 1) {
+            windows_ctrl_handler_installed = true;
+        } else {
+            const err = OS.windows.kernel32.GetLastError();
+            Debug.default.warn("SetConsoleCtrlHandler failed: {d}", .{err});
+        }
+    }
+
+    pub fn cleanup(comptime self: Input) void {
+        if (self == .windows and windows_ctrl_handler_installed) {
+            const kernel32 = struct {
+                extern "kernel32" fn SetConsoleCtrlHandler(
+                    HandlerRoutine: ?*const fn (dwCtrlType: OS.windows.DWORD) callconv(.c) OS.windows.BOOL,
+                    Add: OS.windows.BOOL,
+                ) callconv(.c) OS.windows.BOOL;
+            };
+            _ = kernel32.SetConsoleCtrlHandler(null, 0);
+            windows_ctrl_handler_installed = false;
         }
     }
 
@@ -191,7 +239,7 @@ pub const Input = enum {
         }
     }
 
-    fn broadcast(comptime self: Input, event: InputEvent) void {
+    pub fn broadcast(comptime self: Input, event: InputEvent) void {
         const data = [_]u8{event.write()};
 
         var i: usize = 0;

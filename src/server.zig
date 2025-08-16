@@ -20,11 +20,29 @@ const Time = runtime.Time;
 // Embed HTML
 const html_content = @embedFile("web/index.min.html");
 
+pub const SERVER = "server.exe";
+
 pub fn main() !void {
     // Server gets its own allocator
     var buffer: [4 * 1024 * 1024]u8 = undefined;
     var fba = Heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
+
+    // If we're a restarted instance, kill old servers
+    const args = Process.argsMaybeAlloc(allocator);
+    for (args.constSlice()) |arg| {
+        if (Mem.eql(u8, arg.constSlice(), "--restarted")) {
+            const current_pid = OS.windows.GetCurrentProcessId();
+            var pid_filter_buf: [64]u8 = undefined;
+            const pid_filter = Fmt.bufPrint(&pid_filter_buf, "PID ne {}", .{current_pid}) catch "PID ne 0";
+            _ = Process.Child.run(.{
+                .allocator = allocator,
+                .argv = &[_][]const u8{ "taskkill", "/F", "/IM", SERVER, "/FI", pid_filter },
+            }) catch {};
+            Thread.sleep(500_000_000);
+            break;
+        }
+    }
 
     var server = runtime.server.Server.init(allocator, true);
     try server.run();
@@ -257,7 +275,7 @@ pub const HotReloader = struct {
     fn rebuild(self: *HotReloader) void {
         Debug.server.info("Rebuilding...", .{});
 
-        const build_start_time = Time.timestamp();
+        const build_start_time = Time.nanoTimestamp();
         var child = Process.Child.init(self.rebuild_cmd, self.allocator);
 
         const term = child.spawnAndWait() catch |err| {
@@ -296,13 +314,21 @@ pub const HotReloader = struct {
 
             if (needs_restart) {
                 Debug.server.info("Restarting server...", .{});
-                Process.restartSelf(self.allocator) catch |err| {
+
+                if (OS.is_windows) {
+                    // TODO: figure out how to properly prevent zombie processes
+                    Debug.server.warn("On Windows you may see false build errors...", .{});
+                    Debug.server.warn("If needed, run 'taskkill /F /IM server.exe' to kill zombie servers.", .{});
+                }
+
+                const exe_name = if (OS.is_windows) SERVER else "server";
+                Process.restartSelf(self.allocator, exe_name) catch |err| {
                     Debug.server.err("Failed to restart: {}", .{err});
                 };
-                self.last_server_mtime = Time.timestamp(); // Update to current time
+                self.last_server_mtime = Time.nanoTimestamp();
             }
         } else {
-            // On Windows, check if build actually succeeded but just couldn't copy
+            // On Windows, check if build actually succeeded but just couldn't cop
             if (builtin.target.os.tag == .windows and term.Exited == 1) {
                 // Check if a new server.exe exists in .zig-cache
                 var found_new_exe = false;
@@ -319,7 +345,7 @@ pub const HotReloader = struct {
                 defer walker.deinit();
 
                 while (walker.next() catch null) |entry| {
-                    if (entry.kind == .file and Mem.eql(u8, entry.basename, "server.exe")) {
+                    if (entry.kind == .file and Mem.eql(u8, entry.basename, SERVER)) {
                         var path_buf: [Fs.max_path_bytes]u8 = undefined;
                         const full_path = Fmt.bufPrint(&path_buf, ".zig-cache/o/{s}", .{entry.path}) catch continue;
                         const file = Fs.cwd().openFile(full_path, .{}) catch continue;
@@ -333,11 +359,11 @@ pub const HotReloader = struct {
                 }
 
                 if (found_new_exe) {
-                    Debug.server.success("Build completed (copy faied, but exe built)", .{});
+                    Debug.server.success("Build completed (copy faied, but exe built", .{});
                     self.last_build_failed = false;
-                    self.last_server_mtime = Time.timestamp();
+                    self.last_server_mtime = Time.nanoTimestamp();
                     Debug.server.info("Restarting server...", .{});
-                    Process.restartSelf(self.allocator) catch |err| {
+                    Process.restartSelf(self.allocator, SERVER) catch |err| {
                         Debug.server.err("Failed to restart: {}", .{err});
                     };
                 } else {
@@ -373,7 +399,14 @@ pub const Server = struct {
         }
 
         const address = try Net.Address.parseIp4(HOST, PORT);
-        var server = try address.listen(.{ .reuse_address = true });
+        var server = address.listen(.{ .reuse_address = true }) catch |err| {
+            if (err == error.AddressInUse) {
+                Debug.server.err("Port {} already in use! Another server instance may be running.", .{PORT});
+                Debug.server.info("Run: taskkill /F /IM server.exe", .{});
+                Process.exit(1);
+            }
+            return err;
+        };
 
         Debug.server.info("Zig HTTP Server running at {s}", .{URL});
         Debug.server.info("Serving files from current directory", .{});
