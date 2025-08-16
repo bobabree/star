@@ -1,23 +1,71 @@
 const builtin = @import("builtin");
 const ASCII = @import("Input.zig").ASCII;
 const Channel = @import("Channel.zig");
+const Debug = @import("Debug.zig");
 const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
 const Fs = @import("Fs.zig");
 const IO = @import("IO.zig");
+const Input = @import("Input.zig");
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
+const Process = @import("Process.zig");
 
 const fileSys = Fs.fileSys;
 
-const WHITESPACE = " \t\r\n";
-const PROMPT_BUFFER_SIZE = 256;
-const RECOLOR_BUFFER_SIZE = PROMPT_BUFFER_SIZE * 2;
+const Config = struct {
+    const MAX_PATH_DEPTH = 32;
+    const HISTORY_SIZE = 32;
+    const INPUT_BUFFER_SIZE = 256;
+    const OUTPUT_BUFFER_SIZE = INPUT_BUFFER_SIZE * 2;
+};
+
+const Symbols = struct {
+    const WHITESPACE = " \t\r\n";
+    const BACKSPACE = "\x08";
+    const SPACE = " ";
+    const NEWLINE = "\r\n";
+    const PATH_SEPARATOR = "/";
+    const HOME_SYMBOL = "~";
+    const PROMPT_SEPARATOR = "@";
+    const PROMPT_SUFFIX = "> ";
+};
+
+// Single threadlocal buffer to avoid allocations
+threadlocal var output_buf: [Config.OUTPUT_BUFFER_SIZE]u8 = undefined;
+threadlocal var output_len: usize = 0;
+
+fn bufClear() void {
+    output_len = 0;
+}
+
+fn bufAppend(text: []const u8) void {
+    @memcpy(output_buf[output_len..][0..text.len], text);
+    output_len += text.len;
+}
+
+fn bufAppendBackspaces(count: usize) void {
+    for (0..count) |_| {
+        bufAppend(Symbols.BACKSPACE);
+    }
+}
+
+fn bufAppendSpaces(count: usize) void {
+    for (0..count) |_| {
+        bufAppend(Symbols.SPACE);
+    }
+}
+
+fn bufSend() void {
+    if (output_len > 0) {
+        IO.stdio.out.send(output_buf[0..output_len]);
+        output_len = 0;
+    }
+}
 
 var input_channel = Channel.DefaultChannel{};
-var input_buffer = Utf8Buffer(PROMPT_BUFFER_SIZE).init();
-
-var last_color_sent = AnsiColor.reset;
+var input_line = InputLine{};
+var cmd_history = ShellHistory{};
 
 pub const Shell = enum {
     wasm,
@@ -61,7 +109,6 @@ pub const Shell = enum {
 
     var skip_next: bool = false;
     fn processCommand(comptime self: Shell, cmd: []const u8) void {
-        // Windows sends everything twice, skip every other call
         if (comptime self == .windows) {
             if (skip_next) {
                 skip_next = false;
@@ -70,119 +117,194 @@ pub const Shell = enum {
             skip_next = true;
         }
 
-        // Parse and execute command
         const input_cmd = ShellCmd.parse(cmd);
         input_cmd.execute(cmd);
 
-        // Commands handle their own output/newlines
         if (input_cmd != .clear) {
             self.showPrompt();
         }
     }
 
-    fn processRawInput(comptime self: Shell) void {
-        // TODO: reminder to add shell syntax highlighting for OS
-        if (self != .wasm) return;
-
+    fn processRawInput(comptime _: Shell) void {
         while (input_channel.recv()) |data| {
-            if (data.len > 0) {
-                const byte = data[0];
+            if (data.len == 0) continue;
 
-                if (byte == ASCII.ENTER or byte == ASCII.NEWLINE) {
-                    input_buffer.clear();
-                } else if (byte == ASCII.BACKSPACE or byte == ASCII.BACKSPACE_ALT) {
-                    if (input_buffer.len() > 0) {
-                        input_buffer.removeAt(input_buffer.len() - 1);
-                        recolorInput();
-                    }
-                } else if (byte < ASCII.DEL and byte >= ASCII.SPACE) { // Printable char
-                    var char_bytes = [1]u8{byte};
-                    input_buffer.appendSlice(&char_bytes);
-                    recolorInput();
-                }
+            const event = Input.InputEvent.read(data[0]);
+            bufClear();
+
+            switch (event) {
+                .arrow => |dir| switch (dir) {
+                    .up => if (cmd_history.up()) |cmd| replaceInput(cmd),
+                    .down => if (cmd_history.down()) |cmd| replaceInput(cmd),
+                    .left => if (input_line.moveCursorLeft()) {
+                        bufAppend(Ansi.cursor_back.code());
+                    },
+                    .right => if (input_line.moveCursorRight()) {
+                        bufAppend(Ansi.cursor_forward.code());
+                    },
+                },
+                .ctrl_key => |k| if (k == .ctrl_c) {
+                    input_line.clear();
+                },
+                .special => |s| switch (s) {
+                    .enter => {
+                        IO.stdio.out.send(Symbols.NEWLINE);
+                        const cmd = input_line.text();
+                        input_line.clear();
+                        IO.stdio.in.send(cmd);
+                    },
+                    .backspace => handleBackspace(),
+                    else => {},
+                },
+                .key => |byte| if (byte < ASCII.DEL and byte >= ASCII.SPACE) {
+                    handleCharInput(byte);
+                },
+                else => {},
             }
+
+            bufSend();
+        }
+    }
+
+    fn handleBackspace() void {
+        if (input_line.cursor == 0) return;
+
+        const text_after_cursor = input_line.text()[input_line.cursor..];
+        var temp: [Config.INPUT_BUFFER_SIZE]u8 = undefined;
+        @memcpy(temp[0..text_after_cursor.len], text_after_cursor);
+
+        const was_valid = ShellCmd.isValid(input_line.text());
+
+        if (input_line.backspace()) {
+            bufAppend(Symbols.BACKSPACE);
+            bufAppend(temp[0..text_after_cursor.len]);
+            bufAppend(Symbols.SPACE);
+            bufAppendBackspaces(text_after_cursor.len + 1);
+
+            const is_valid = ShellCmd.isValid(input_line.text());
+            if (was_valid != is_valid) {
+                recolorInput();
+            }
+        }
+    }
+
+    fn handleCharInput(byte: u8) void {
+        const was_valid = ShellCmd.isValid(input_line.text());
+        input_line.insertChar(byte);
+        const is_valid = ShellCmd.isValid(input_line.text());
+
+        const color = if (is_valid) Ansi.cyan else Ansi.red;
+        bufAppend(Ansi.bold.code());
+        bufAppend(color.code());
+        bufAppend(&[_]u8{byte});
+        bufAppend(Ansi.reset.code());
+
+        if (was_valid != is_valid) {
+            recolorInput();
         }
     }
 
     fn recolorInput() void {
-        const color = if (ShellCmd.isValid(input_buffer.constSlice()))
-            AnsiColor.cyan
-        else
-            AnsiColor.red;
+        const color = if (ShellCmd.isValid(input_line.text())) Ansi.cyan else Ansi.red;
 
-        var recolor = Utf8Buffer(RECOLOR_BUFFER_SIZE).init();
-        const line_len = input_buffer.constSlice().len;
+        bufAppendBackspaces(input_line.cursor);
 
-        // Move back to start of input
-        for (0..line_len) |_| {
-            recolor.appendSlice(AnsiColor.cursor_back.code());
+        bufAppend(Ansi.bold.code());
+        bufAppend(color.code());
+        bufAppend(input_line.text());
+        bufAppend(Ansi.reset.code());
+
+        bufAppendBackspaces(input_line.len() - input_line.cursor);
+    }
+
+    fn replaceInput(cmd: []const u8) void {
+        bufClear();
+
+        for (0..input_line.cursor) |_| {
+            bufAppend(Ansi.cursor_back.code());
         }
 
-        // rewrite with correct color
-        recolor.appendSlice(color.code());
-        recolor.appendSlice(input_buffer.constSlice());
-        recolor.appendSlice(AnsiColor.reset.code());
+        const byte_count = input_line.text().len;
+        bufAppendSpaces(byte_count);
+        bufAppendBackspaces(byte_count);
 
-        IO.stdio.out.send(recolor.constSlice());
+        input_line.set(cmd);
+        bufAppend(cmd);
+
+        const color = if (ShellCmd.isValid(cmd)) Ansi.cyan else Ansi.red;
+        bufAppendBackspaces(cmd.len);
+        bufAppend(Ansi.bold.code());
+        bufAppend(color.code());
+        bufAppend(cmd);
+        bufAppend(Ansi.reset.code());
+
+        bufSend();
     }
 
     fn showGreeting(comptime self: Shell) void {
-        var greeting = Utf8Buffer(256).init();
-        greeting.appendSlice(AnsiColor.clear_screen.code());
-        greeting.appendSlice("Welcome to ");
-        greeting.appendSlice(AnsiColor.bold.code());
-        greeting.appendSlice(AnsiColor.cyan.code());
-        greeting.appendSlice("StarOS!");
-        greeting.appendSlice(AnsiColor.reset.code());
-        greeting.appendSlice("\r\nType ");
-        greeting.appendSlice(AnsiColor.green.code());
-        greeting.appendSlice("help");
-        greeting.appendSlice(AnsiColor.reset.code());
-        greeting.appendSlice(" for instructions.\r\n");
-        IO.stdio.out.send(greeting.constSlice());
+        bufClear();
+        bufAppend(Ansi.clear_screen.code());
+        bufAppend("Welcome to StarOS!");
+        bufAppend(Symbols.NEWLINE);
+        bufAppend("Type ");
+        bufAppend(Ansi.bold.code());
+        bufAppend(Ansi.cyan.code());
+        bufAppend("help");
+        bufAppend(Ansi.reset.code());
+        bufAppend(" for help, ");
+        bufAppend(Ansi.bold.code());
+        bufAppend(Ansi.red.code());
+        bufAppend("exit");
+        bufAppend(Ansi.reset.code());
+        bufAppend(" to exit.");
+        bufAppend(Symbols.NEWLINE);
+        bufSend();
         self.showPrompt();
     }
 
-    fn showPrompt(comptime self: Shell) void {
-        _ = self;
+    fn showPrompt(comptime _: Shell) void {
+        bufClear();
 
-        // build curr path
-        var path = Fs.PathBuffer.init();
-        var indices = FixedBuffer(u8, 32).init(0);
+        var path: [Config.INPUT_BUFFER_SIZE]u8 = undefined;
+        var path_len: usize = 0;
+
         var current = fileSys.getCurrentDir();
-
-        // If we're at root, just show ~
         if (current == 0) {
-            path.setSlice("~");
+            @memcpy(path[0..1], Symbols.HOME_SYMBOL);
+            path_len = 1;
         } else {
-            // Build path from root
+            var indices: [Config.MAX_PATH_DEPTH]u8 = undefined;
+            var idx_count: usize = 0;
+
             while (current != 0) {
-                indices.append(current);
+                indices[idx_count] = current;
+                idx_count += 1;
                 current = fileSys.getParent(current);
             }
 
-            path.setSlice("~");
-            while (indices.pop()) |idx| {
-                const name = fileSys.getName(idx);
-                path.appendSlice("/");
-                path.appendSlice(name.constSlice());
+            @memcpy(path[0..1], Symbols.HOME_SYMBOL);
+            path_len = 1;
+
+            while (idx_count > 0) {
+                idx_count -= 1;
+                const name = fileSys.getName(indices[idx_count]);
+                @memcpy(path[path_len..][0..1], Symbols.PATH_SEPARATOR);
+                path_len += 1;
+                @memcpy(path[path_len..][0..name.len()], name.constSlice());
+                path_len += name.len();
             }
         }
 
-        // Show prompt with current directory (fish style)
-        var prompt = Fs.PathBuffer.init();
-        prompt.appendSlice(AnsiColor.bright_green.code());
-        prompt.appendSlice("root");
-        prompt.appendSlice(AnsiColor.reset.code());
-        prompt.appendSlice("@");
-        prompt.appendSlice(AnsiColor.bold.code());
-        prompt.appendSlice(AnsiColor.cyan.code());
-        prompt.appendSlice("StarOS ");
-        prompt.appendSlice(AnsiColor.green.code());
-        prompt.appendSlice(path.constSlice());
-        prompt.appendSlice(AnsiColor.reset.code());
-        prompt.appendSlice("> ");
-        IO.stdio.out.send(prompt.constSlice());
+        bufAppend(Ansi.bright_green.code());
+        bufAppend("root");
+        bufAppend(Ansi.reset.code());
+        bufAppend(Symbols.PROMPT_SEPARATOR);
+        bufAppend("StarOS ");
+        bufAppend(Ansi.green.code());
+        bufAppend(path[0..path_len]);
+        bufAppend(Ansi.reset.code());
+        bufAppend(Symbols.PROMPT_SUFFIX);
+        bufSend();
     }
 };
 
@@ -197,6 +319,94 @@ else switch (builtin.target.os.tag) {
     else => @compileError("Unsupported shell platform"),
 };
 
+const InputLine = struct {
+    buffer: Utf8Buffer(Config.INPUT_BUFFER_SIZE) = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init(),
+    cursor: usize = 0,
+
+    fn clear(self: *InputLine) void {
+        self.buffer.clear();
+        self.cursor = 0;
+    }
+
+    fn set(self: *InputLine, content: []const u8) void {
+        self.buffer.setSlice(content);
+        self.cursor = self.buffer.len();
+    }
+
+    fn insertChar(self: *InputLine, byte: u8) void {
+        var char_bytes = [1]u8{byte};
+        self.buffer.insertSliceAt(self.cursor, &char_bytes);
+        self.cursor += 1;
+    }
+
+    fn backspace(self: *InputLine) bool {
+        if (self.cursor > 0) {
+            self.buffer.removeAt(self.cursor - 1);
+            self.cursor -= 1;
+            return true;
+        }
+        return false;
+    }
+
+    fn moveCursorLeft(self: *InputLine) bool {
+        if (self.cursor > 0) {
+            self.cursor -= 1;
+            return true;
+        }
+        return false;
+    }
+
+    fn moveCursorRight(self: *InputLine) bool {
+        if (self.cursor < self.buffer.len()) {
+            self.cursor += 1;
+            return true;
+        }
+        return false;
+    }
+
+    fn text(self: *const InputLine) []const u8 {
+        return self.buffer.constSlice();
+    }
+
+    fn len(self: *const InputLine) usize {
+        return self.buffer.len();
+    }
+};
+
+const ShellHistory = struct {
+    cmds: FixedBuffer(Utf8Buffer(Config.INPUT_BUFFER_SIZE), Config.HISTORY_SIZE) = FixedBuffer(Utf8Buffer(Config.INPUT_BUFFER_SIZE), Config.HISTORY_SIZE).init(0),
+    index: usize = 0,
+
+    fn add(self: *ShellHistory, cmd: []const u8) void {
+        if (cmd.len == 0) return;
+        var buf = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
+        buf.setSlice(cmd);
+        self.cmds.append(buf);
+        self.index = self.cmds.len;
+    }
+
+    fn up(self: *ShellHistory) ?[]const u8 {
+        if (self.cmds.len == 0) return null;
+        if (self.index > 0) {
+            self.index -= 1;
+            return self.cmds.slice()[self.index].constSlice();
+        }
+        return null;
+    }
+
+    fn down(self: *ShellHistory) ?[]const u8 {
+        if (self.cmds.len == 0) return null;
+        if (self.index < self.cmds.len - 1) {
+            self.index += 1;
+            return self.cmds.slice()[self.index].constSlice();
+        } else if (self.index == self.cmds.len - 1) {
+            self.index = self.cmds.len;
+            return "";
+        }
+        return null;
+    }
+};
+
 pub const ShellCmd = enum {
     ls,
     pwd,
@@ -206,10 +416,11 @@ pub const ShellCmd = enum {
     rm,
     clear,
     help,
+    exit,
     unknown,
 
     pub fn parse(cmd: []const u8) ShellCmd {
-        const trimmed = Mem.trim(u8, cmd, WHITESPACE);
+        const trimmed = Mem.trim(u8, cmd, Symbols.WHITESPACE);
 
         // Extract command part
         const command = if (Mem.indexOf(u8, trimmed, " ")) |space_idx|
@@ -225,12 +436,12 @@ pub const ShellCmd = enum {
         if (Mem.eql(u8, command, "mkdir")) return .mkdir;
         if (Mem.eql(u8, command, "touch")) return .touch;
         if (Mem.eql(u8, command, "rm")) return .rm;
-
+        if (Mem.eql(u8, command, "exit")) return .exit;
         return .unknown;
     }
 
     pub fn isValid(input: []const u8) bool {
-        const trimmed = Mem.trim(u8, input, WHITESPACE);
+        const trimmed = Mem.trim(u8, input, Symbols.WHITESPACE);
         if (trimmed.len == 0) return false;
 
         // check if it's a complete command or partial typing
@@ -238,17 +449,22 @@ pub const ShellCmd = enum {
     }
 
     pub fn execute(self: ShellCmd, cmd: []const u8) void {
-        const trimmed = Mem.trim(u8, cmd, WHITESPACE);
+        const trimmed = Mem.trim(u8, cmd, Symbols.WHITESPACE);
+
+        if (ShellCmd.isValid(cmd)) {
+            cmd_history.add(trimmed);
+        }
 
         switch (self) {
             .ls => cmdLs(),
             .pwd => cmdPwd(),
-            .cd => if (trimmed.len > 3) cmdCd(Mem.trim(u8, trimmed[3..], WHITESPACE ++ "/")),
-            .mkdir => if (trimmed.len > 6) cmdMkdir(Mem.trim(u8, trimmed[6..], WHITESPACE)),
-            .touch => if (trimmed.len > 6) cmdTouch(Mem.trim(u8, trimmed[6..], WHITESPACE)),
-            .rm => if (trimmed.len > 3) cmdRm(Mem.trim(u8, trimmed[3..], WHITESPACE)),
+            .cd => if (trimmed.len > 3) cmdCd(Mem.trim(u8, trimmed[3..], Symbols.WHITESPACE ++ "/")),
+            .mkdir => if (trimmed.len > 6) cmdMkdir(Mem.trim(u8, trimmed[6..], Symbols.WHITESPACE)),
+            .touch => if (trimmed.len > 6) cmdTouch(Mem.trim(u8, trimmed[6..], Symbols.WHITESPACE)),
+            .rm => if (trimmed.len > 3) cmdRm(Mem.trim(u8, trimmed[3..], Symbols.WHITESPACE)),
             .clear => cmdClear(),
             .help => cmdHelp(),
+            .exit => cmdExit(),
             .unknown => cmdUnknown(cmd),
         }
     }
@@ -399,13 +615,34 @@ pub const ShellCmd = enum {
         shell.showGreeting();
     }
 
+    // TODO: IMPORTANT: make commands self documenting
     fn cmdHelp() void {
-        IO.stdio.out.send("Commands: ls, pwd, cd, mkdir, touch, rm, clear, help");
-        IO.stdio.out.send("\r\n");
+        const help = comptime blk: {
+            var text: []const u8 = "Commands:";
+            var first = true;
+            for (@typeInfo(ShellCmd).@"enum".fields) |field| {
+                if (!Mem.eql(u8, field.name, "unknown")) {
+                    text = text ++ (if (first) " " else ", ") ++ field.name;
+                    first = false;
+                }
+            }
+            break :blk text;
+        };
+        IO.stdio.out.send(help ++ "\r\n");
+    }
+
+    fn cmdExit() void {
+        // Platform-specific exit
+        if (OS.is_wasm) {
+            // TODO: Can't really exit in browser, maybe consider tab exit?
+            IO.stdio.out.send("(Browser tab still open - close manually)\r\n");
+        } else {
+            Process.exit(0);
+        }
     }
 
     fn cmdUnknown(cmd: []const u8) void {
-        if (cmd.len == 0 or Mem.trim(u8, cmd, WHITESPACE).len == 0) {
+        if (cmd.len == 0 or Mem.trim(u8, cmd, Symbols.WHITESPACE).len == 0) {
             return; // Empty commd
         }
         IO.stdio.out.send("Unknown command: ");
@@ -414,7 +651,7 @@ pub const ShellCmd = enum {
     }
 };
 
-pub const AnsiColor = enum {
+pub const Ansi = enum {
     // Foreground colors
     black, // 30
     red, // 31
@@ -457,10 +694,13 @@ pub const AnsiColor = enum {
     strikethrough, // 9
 
     // Code
-    cursor_back, // Move cursor back one position
+    cursor_back,
+    cursor_forward,
     clear_screen,
+    cursor_save,
+    cursor_restore,
 
-    pub fn code(self: AnsiColor) []const u8 {
+    pub fn code(self: Ansi) []const u8 {
         return switch (self) {
             // Foreground
             .black => "\x1b[30m",
@@ -504,8 +744,11 @@ pub const AnsiColor = enum {
             .strikethrough => "\x1b[9m",
 
             // Code
-            .cursor_back => "\x08",
+            .cursor_back => "\x1b[D",
+            .cursor_forward => "\x1b[C",
             .clear_screen => "\x1b[2J\x1b[H",
+            .cursor_save => "\x1b[s",
+            .cursor_restore => "\x1b[u",
         };
     }
 };
@@ -526,7 +769,7 @@ test "Shell syntax highlighting" {
     try Testing.expect(ShellCmd.isValid("clear"));
 
     // Simulate typing "ls" then backspace to "l"
-    var buf = Utf8Buffer(PROMPT_BUFFER_SIZE).init();
+    var buf = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
 
     buf.appendSlice("l");
     try Testing.expect(!ShellCmd.isValid(buf.constSlice())); // "l" is invalid
@@ -536,4 +779,342 @@ test "Shell syntax highlighting" {
 
     buf.removeAt(buf.len() - 1); // Backspace
     try Testing.expect(!ShellCmd.isValid(buf.constSlice())); // "l" is invalid again
+}
+
+// Test helper to capture output
+const OutputCapture = struct {
+    buffer: Utf8Buffer(4096) = Utf8Buffer(4096).init(),
+
+    fn reset(self: *OutputCapture) void {
+        self.buffer.clear();
+    }
+
+    fn capture(self: *OutputCapture, text: []const u8) void {
+        self.buffer.appendSlice(text);
+    }
+
+    fn contains(self: *const OutputCapture, text: []const u8) bool {
+        return self.buffer.contains(text);
+    }
+};
+
+// Mock IO.stdio.out for testing
+var test_output = OutputCapture{};
+
+fn mockSend(text: []const u8) void {
+    test_output.capture(text);
+}
+
+test "Bug: first character has no color" {
+    var line = InputLine{};
+    test_output.reset();
+
+    _ = ShellCmd.isValid(line.text());
+    line.insertChar('l');
+    const is_valid = ShellCmd.isValid(line.text());
+
+    var output = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
+    const color = if (is_valid) Ansi.cyan else Ansi.red;
+    output.appendSlice(Ansi.bold.code());
+    output.appendSlice(color.code());
+    output.appendSlice("l");
+    output.appendSlice(Ansi.reset.code());
+    mockSend(output.constSlice());
+
+    // Verify red color was applied
+    try Testing.expect(test_output.contains("\x1b[31m")); // Has red
+    try Testing.expect(test_output.contains("l")); // Has the character
+}
+
+test "Bug: typing doesn't maintain color" {
+    var line = InputLine{};
+
+    // Type "ls" - 'l' is red, then 's' makes it cyan
+    test_output.reset();
+    line.insertChar('l');
+
+    var output = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
+    output.appendSlice(Ansi.bold.code());
+    output.appendSlice(Ansi.red.code());
+    output.appendSlice("l");
+    output.appendSlice(Ansi.reset.code());
+    mockSend(output.constSlice());
+
+    // Verify 'l' is red
+    try Testing.expect(test_output.contains("\x1b[31m"));
+
+    // Now type 's' - should trigger recolor to cyan
+    test_output.reset();
+    line.insertChar('s');
+
+    output.clear();
+    output.appendSlice(Ansi.bold.code());
+    output.appendSlice(Ansi.cyan.code());
+    output.appendSlice("s");
+    output.appendSlice(Ansi.reset.code());
+
+    // Then recolor the whole line
+    output.appendSlice("\x08\x08");
+    output.appendSlice(Ansi.bold.code());
+    output.appendSlice(Ansi.cyan.code());
+    output.appendSlice("ls");
+    output.appendSlice(Ansi.reset.code());
+
+    mockSend(output.constSlice());
+
+    // Verify cyan color was applied
+    try Testing.expect(test_output.contains("\x1b[36m"));
+    try Testing.expect(test_output.contains("ls"));
+}
+
+test "Bug: recolorInput doesn't restore cursor position" {
+    var line = InputLine{};
+    test_output.reset();
+
+    line.set("hello");
+    line.cursor = 2;
+
+    // Simulate recolorInput
+    var recolor = Utf8Buffer(Config.OUTPUT_BUFFER_SIZE).init();
+
+    // Move back from current position (2)
+    for (0..line.cursor) |_| {
+        recolor.appendSlice(Ansi.cursor_back.code());
+    }
+
+    recolor.appendSlice(Ansi.bold.code());
+    recolor.appendSlice(Ansi.cyan.code());
+    recolor.appendSlice(line.text());
+    recolor.appendSlice(Ansi.reset.code());
+
+    // Move back to position 2 (5 - 2 = 3 moves back)
+    const chars_after = line.len() - line.cursor;
+    for (0..chars_after) |_| {
+        recolor.appendSlice(Ansi.cursor_back.code());
+    }
+
+    mockSend(recolor.constSlice());
+
+    // Verify we moved back correct number of time
+    var back_count: usize = 0;
+    const output = test_output.buffer.constSlice();
+    var i: usize = 0;
+    while (i + 2 < output.len) : (i += 1) {
+        if (output[i] == '\x1b' and output[i + 1] == '[' and output[i + 2] == 'D') {
+            back_count += 1;
+        }
+    }
+
+    // Should move back 2 to start, then 3 to return to position 2
+    try Testing.expect(back_count == 5);
+}
+
+test "Bug: replaceInput uses wrong backspace count" {
+    var line = InputLine{};
+
+    line.set("café");
+    test_output.reset();
+
+    // Simulate fixed replaceInput
+    const byte_count = line.text().len;
+    for (0..byte_count) |_| {
+        mockSend("\x08 \x08");
+    }
+
+    // Count backspaces sent
+    var backspace_count: usize = 0;
+    const output = test_output.buffer.constSlice();
+    var i: usize = 0;
+    while (i + 2 < output.len) : (i += 1) {
+        if (output[i] == '\x08' and output[i + 1] == ' ' and output[i + 2] == '\x08') {
+            backspace_count += 1;
+            i += 2;
+        }
+    }
+
+    // Should send 5 backspaces for 5 bytes, not 4 for 4 chars
+    try Testing.expect(backspace_count == 5);
+    try Testing.expect(line.len() == 4);
+}
+
+test "Bug: cursor position wrong after history navigation" {
+    var line = InputLine{};
+    var history = ShellHistory{};
+
+    history.add("short");
+    history.add("very long command");
+
+    line.set("hello");
+    line.cursor = 3;
+
+    test_output.reset();
+
+    // Simulate replaceInput
+    // First move cursor to start
+    for (0..line.cursor) |_| {
+        mockSend(Ansi.cursor_back.code());
+    }
+
+    // Clear line
+    const old_byte_count = line.text().len;
+    for (0..old_byte_count) |_| {
+        mockSend(" ");
+    }
+    for (0..old_byte_count) |_| {
+        mockSend(Symbols.BACKSPACE);
+    }
+
+    // Write new text
+    const cmd = history.up().?;
+    line.set(cmd);
+    mockSend(cmd);
+
+    // verify cursor movements
+    try Testing.expect(line.cursor == cmd.len);
+    try Testing.expect(test_output.contains("very long command"));
+}
+
+test "Bug: backspace doesn't update display correctly" {
+    var line = InputLine{};
+
+    line.set("hello");
+    line.cursor = 3;
+
+    test_output.reset();
+
+    // cpy the text that will shift BEFORE backspace modifies the buffer
+    var shift_copy = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
+    shift_copy.setSlice(line.text()[line.cursor..]);
+    const text_to_shift = shift_copy.constSlice();
+
+    const did_backspace = line.backspace();
+    try Testing.expect(did_backspace);
+
+    // simulate what the handler sends
+    var update = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
+    update.appendSlice(Symbols.BACKSPACE);
+    update.appendSlice(text_to_shift);
+    update.appendSlice(" ");
+    for (0..text_to_shift.len + 1) |_| {
+        update.appendSlice(Symbols.BACKSPACE);
+    }
+    mockSend(update.constSlice());
+
+    try Testing.expectEqualStrings(line.text(), "helo");
+    try Testing.expect(line.cursor == 2);
+
+    //  check for the exact seq
+    const expected = "\x08lo \x08\x08\x08";
+    try Testing.expectEqualStrings(test_output.buffer.constSlice(), expected);
+}
+
+test "Bug: cursor position wrong after prompt" {
+    var line = InputLine{};
+    test_output.reset();
+
+    // simulate typing after prompt
+    mockSend("root@StarOS ~> ");
+
+    // Type a dot - should just echo it
+    line.insertChar('.');
+    mockSend(".");
+
+    // Verify no cursor movement sequences were  sent
+    try Testing.expect(!test_output.contains("\x1b[D"));
+    try Testing.expect(test_output.contains("."));
+}
+
+test "Bug: syntax highlighting and prompt overwrite" {
+    var line = InputLine{};
+    test_output.reset();
+
+    // Type 'l' - should be red
+    line.insertChar('l');
+    const is_valid_l = ShellCmd.isValid(line.text());
+    try Testing.expect(!is_valid_l);
+
+    // Type 's' - should trigger recolor to cyan
+    line.insertChar('s');
+    const is_valid_ls = ShellCmd.isValid(line.text());
+    try Testing.expect(is_valid_ls);
+
+    // Verify colors were applied
+    try Testing.expect(line.text().len == 2);
+}
+
+test "Bug: recolorInput deletes prompt space" {
+    var line = InputLine{};
+    test_output.reset();
+
+    mockSend("root@StarOS ~> ");
+
+    line.insertChar('l');
+    mockSend("l");
+
+    line.insertChar('s');
+    mockSend("s");
+
+    // now, recolor from correct position
+    test_output.reset();
+    for (0..line.cursor) |_| {
+        mockSend(Ansi.cursor_back.code());
+    }
+    mockSend("ls");
+
+    // should be at position 15 (start of "ls"), not 14 (the space)
+    try Testing.expect(line.cursor == 2);
+}
+
+test "Bug: command output appears on same line as input" {
+    test_output.reset();
+
+    var line = InputLine{};
+    line.set("help");
+
+    mockSend(Symbols.NEWLINE);
+    _ = line.text();
+    line.clear();
+
+    mockSend("Commands: ls, pwd, cd, mkdir, touch, rm, clear, help, exit");
+
+    const output = test_output.buffer.constSlice();
+    try Testing.expect(output[0] != 'C');
+}
+
+test "Bug: backspace doesn't update color when validity changes" {
+    var line = InputLine{};
+    test_output.reset();
+
+    // Type "ls" - valid, cyan
+    line.insertChar('l');
+    line.insertChar('s');
+    try Testing.expect(ShellCmd.isValid(line.text()));
+
+    test_output.reset();
+    const text_after = line.text()[line.cursor..];
+    var temp: [Config.INPUT_BUFFER_SIZE]u8 = undefined;
+    @memcpy(temp[0..text_after.len], text_after);
+
+    const was_valid = ShellCmd.isValid(line.text());
+    _ = line.backspace();
+
+    bufClear();
+    bufAppend(Symbols.BACKSPACE);
+    bufAppend(temp[0..text_after.len]);
+    bufAppend(Symbols.SPACE);
+    bufAppendBackspaces(text_after.len + 1);
+
+    const is_valid = ShellCmd.isValid(line.text());
+    if (was_valid != is_valid) {
+        const color = if (is_valid) Ansi.cyan else Ansi.red;
+        bufAppendBackspaces(line.cursor);
+        bufAppend(Ansi.bold.code());
+        bufAppend(color.code());
+        bufAppend(line.text());
+        bufAppend(Ansi.reset.code());
+        bufAppendBackspaces(line.len() - line.cursor);
+    }
+
+    mockSend(output_buf[0..output_len]);
+    try Testing.expect(test_output.contains("\x1b[31m"));
 }

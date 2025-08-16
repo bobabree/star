@@ -13,6 +13,7 @@ pub const len = mem.len;
 pub const span = mem.span;
 pub const startsWith = mem.startsWith;
 pub const trim = mem.trim;
+pub const zeroes = mem.zeroes;
 
 const Debug = @import("Debug.zig");
 

@@ -14,6 +14,7 @@ const Time = runtime.Time;
 const Wasm = runtime.Wasm;
 const builtin = runtime.builtin;
 
+const Terminal = runtime.Terminal;
 const fileSys = runtime.Fs.fileSys;
 const input = runtime.Input.input;
 const shell = runtime.Shell.shell;
@@ -134,7 +135,16 @@ else switch (builtin.target.os.tag) {
     else => @compileError("Unsupported app platform: " ++ @tagName(builtin.target.os.tag)),
 };
 
+fn cleanup() void {
+    // Restore terminal settings
+    // TODO: consider moving to Terminal.zig
+    if (builtin.target.os.tag == .macos or builtin.target.os.tag == .linux) {
+        OS.posix.tcsetattr(OS.posix.STDIN_FILENO, .FLUSH, Terminal.original_mode) catch {};
+    }
+}
+
 pub fn main() !void {
+    defer cleanup();
     switch (comptime app) {
         inline else => |a| {
             a.init();

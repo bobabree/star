@@ -6,7 +6,6 @@ const Input = @import("Input.zig");
 const IO = @import("IO.zig");
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
-const Posix = @import("Posix.zig");
 const Thread = @import("Thread.zig");
 const Time = @import("Time.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
@@ -20,7 +19,9 @@ var input_channel = Channel.DefaultChannel{};
 // Native terminal state (for non-wasm platforms)
 var width: u16 = 80;
 var height: u16 = 24;
-var is_raw_mode: bool = false;
+pub const TerminalMode = if (builtin.os.tag == .windows) OS.windows.DWORD else OS.posix.termios;
+// Store original terminal mode for restoration
+pub var original_mode: TerminalMode = Mem.zeroes(TerminalMode);
 
 pub const Terminal = enum {
     wasm,
@@ -52,14 +53,49 @@ pub const Terminal = enum {
             },
             else => {
                 // Native
-                terminalInit("terminal");
+                self.terminalInit("terminal");
             },
         }
     }
 
-    fn terminalInit(_: []const u8) void {
+    fn terminalInit(comptime self: Terminal, _: []const u8) void {
         const stderr_thread = Thread.spawn(.{}, terminalWrite, .{}) catch return;
         stderr_thread.detach();
+
+        switch (self) {
+            .wasm => {},
+            .macos, .linux => {
+                const stdin_handle = OS.posix.STDIN_FILENO;
+
+                // Get current terminal settings
+                original_mode = OS.posix.tcgetattr(stdin_handle) catch |err| {
+                    Debug.default.warn("Failed to get terminal attributes: {}", .{err});
+                    return;
+                };
+
+                var new_mode = original_mode;
+
+                new_mode.lflag.ECHO = false;
+                new_mode.lflag.ICANON = false;
+                new_mode.lflag.ISIG = false; // ctrl +C
+                //new_mode.lflag.ISIG = false; // TODO: isable signal generation
+                new_mode.cc[@intFromEnum(OS.posix.V.MIN)] = 1;
+                new_mode.cc[@intFromEnum(OS.posix.V.TIME)] = 0;
+
+                OS.posix.tcsetattr(stdin_handle, .FLUSH, new_mode) catch |err| {
+                    Debug.default.warn("Failed to set terminal attributes: {}", .{err});
+                    return;
+                };
+            },
+            .windows => {
+                // TODO: Implement Windows terminal configuration
+                // Need to:
+                // 1. GetConsoleMode to save original
+                // 2. SetConsoleMode to disable line buffering
+                // 3. Enable virtual terminal processing for ANSI colors
+            },
+            else => {},
+        }
     }
 
     fn terminalWrite() void {
@@ -68,7 +104,7 @@ pub const Terminal = enum {
                 Debug.default.err("Failed to get stderr handle: {}", .{err});
                 return;
             },
-            else => Posix.STDERR_FILENO,
+            else => OS.posix.STDERR_FILENO,
         };
 
         const stderr = Fs.File{ .handle = handle };
@@ -92,54 +128,20 @@ pub const Terminal = enum {
         while (input_channel.recv()) |data| {
             if (data.len > 0) {
                 const event = Input.InputEvent.read(data[0]);
-                const char_opt: ?u8 = switch (event) {
-                    .key => |k| k,
-                    .special => |s| switch (s) {
-                        .enter => @as(u8, ASCII.ENTER),
-                        .backspace => @as(u8, ASCII.BACKSPACE),
-                        .tab => @as(u8, ASCII.TAB),
-                        .escape => @as(u8, ASCII.ESCAPE),
-                        else => null,
+
+                switch (event) {
+                    .ctrl_key => |k| if (k == .ctrl_c) {
+                        input_buffer.clear();
+                        self.write("^C\r\n");
+                        self.write("(to exit Star, type 'exit')\r\n");
+                        IO.stdio.in.send("");
+                        return;
                     },
-                    .ctrl_key => |k| switch (k) {
-                        .ctrl_c => @as(u8, ASCII.CTRL_C),
-                        .ctrl_d => @as(u8, ASCII.CTRL_D),
-                        .ctrl_z => @as(u8, ASCII.CTRL_Z),
-                        .ctrl_l => @as(u8, ASCII.CTRL_L),
+                    .key => |byte| if (byte < ASCII.DEL and byte >= ASCII.SPACE) {
+                        var char_bytes = [1]u8{byte};
+                        input_buffer.appendSlice(&char_bytes);
                     },
-                    else => null,
-                };
-
-                const char = char_opt orelse continue;
-
-                if (char == ASCII.ENTER) {
-                    const cmd = input_buffer.constSlice(); // Get the buffer content
-                    input_buffer.clear();
-
-                    switch (self) {
-                        .wasm => self.write("\r\n"),
-                        else => {},
-                    }
-
-                    IO.stdio.in.send(cmd);
-                } else if (char == ASCII.BACKSPACE or char == ASCII.BACKSPACE_ALT) {
-                    if (input_buffer.len() > 0) {
-                        input_buffer.removeAt(input_buffer.len() - 1); // Remove last char
-                        switch (self) {
-                            .wasm => self.write("\x08 \x08"),
-                            else => {},
-                        }
-                    }
-                } else if (input_buffer.constSlice().len < 255) { // Check byte length
-                    var char_bytes = [1]u8{char};
-                    input_buffer.appendSlice(&char_bytes);
-                    switch (self) {
-                        .wasm => {
-                            var echo: [1]u8 = .{char};
-                            self.write(&echo);
-                        },
-                        else => {},
-                    }
+                    else => {},
                 }
             }
         }
@@ -153,46 +155,6 @@ pub const Terminal = enum {
 
     pub fn getChannel(_: Terminal) *Channel.DefaultChannel {
         return &input_channel;
-    }
-
-    pub fn enterRawMode(comptime self: Terminal) void {
-        if (is_raw_mode) return;
-
-        switch (self) {
-            .wasm => {},
-            .windows => {},
-            .macos, .linux => {},
-            else => {
-                Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
-            },
-        }
-
-        is_raw_mode = true;
-    }
-
-    pub fn exitRawMode(comptime self: Terminal) void {
-        if (!is_raw_mode) return;
-
-        switch (self) {
-            .wasm => {},
-            .windows => {},
-            .macos, .linux => {},
-            else => {
-                Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
-            },
-        }
-
-        is_raw_mode = false;
-    }
-
-    pub fn clear(comptime self: Terminal) void {
-        switch (self) {
-            .wasm => Wasm.terminalWrite("\x1b[2J\x1b[H"),
-            .windows, .macos, .linux => {},
-            else => {
-                Debug.default.warn("Unsupported platform: {s}", .{@tagName(self)});
-            },
-        }
     }
 
     pub fn write(comptime self: Terminal, text: []const u8) void {

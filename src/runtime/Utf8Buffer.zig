@@ -180,6 +180,27 @@ pub fn Utf8Buffer(comptime capacity: usize) type {
             Debug.assert(isValidUtf8(self.constSlice()));
         }
 
+        pub fn insertSliceAt(self: *Self, pos: usize, text: []const u8) void {
+            Debug.assert(isValidUtf8(self.constSlice()));
+            Debug.assert(isValidUtf8(text));
+            Debug.assert(pos <= self.len());
+
+            var byte_pos: usize = 0;
+            var char_index: usize = 0;
+
+            while (char_index < pos and byte_pos < self._buffer.len) {
+                const char_len = utf8CharLen(self._buffer.slice()[byte_pos]);
+                byte_pos += char_len;
+                char_index += 1;
+            }
+
+            Debug.panicAssert(byte_pos <= self._buffer.len, "insertSliceAt: character position {} exceeds string length", .{pos});
+
+            self._buffer.insertSlice(byte_pos, text);
+
+            Debug.assert(isValidUtf8(self.constSlice()));
+        }
+
         pub fn removeAt(self: *Self, pos: usize) void {
             Debug.assert(isValidUtf8(self.constSlice()));
 

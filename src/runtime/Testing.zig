@@ -73,11 +73,11 @@ pub const ProfiledTest = struct {
 
         if (self.fba) |fba| {
             const memory_used = fba.end_index - (self.start_memory orelse 0);
-            Debug.default.info("[{s:<40}]", .{self.name});
+            Debug.default.info("\n[{s}]", .{self.name});
             printTimeBreakdown(" ⏱️ Time: ", elapsed_ns);
             printMemoryBreakdown(" 💾 Memory: ", memory_used);
         } else {
-            Debug.default.info("[{s:<40}]", .{self.name});
+            Debug.default.info("\n[{s}]", .{self.name});
             printTimeBreakdown(" ⏱️ Time: ", elapsed_ns);
         }
     }

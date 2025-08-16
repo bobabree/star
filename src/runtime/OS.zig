@@ -7,4 +7,5 @@ pub const is_wasi = builtin.target.os.tag == .wasi;
 pub const is_wasm = builtin.target.cpu.arch.isWasm();
 pub const is_windows = builtin.target.os.tag == .windows;
 
+pub const posix = @import("std").posix;
 pub const windows = os.windows;

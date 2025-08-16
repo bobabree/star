@@ -95,21 +95,13 @@ export fn sleep_callback(func_id: u32) void {
 }
 
 var last_wasm_hash: u32 = 0;
-var reload_counter: u32 = 0;
 export fn fetch_callback(callback_id: u32, value: u32) void {
     if (callback_id == FETCH_WASM_SIZE) {
-        reload_counter += 1;
-
         if (last_wasm_hash != 0 and value != last_wasm_hash) {
-            // File changed! But wait - builds write files in stages (truncate -> write -> flush).
-            // Reloading mid-write = corrupted WASM. After 3+ checks, file is definitely stable.
-            if (reload_counter > 3) {
-                Wasm.reloadWasm();
-                reload_counter = 0; // Reset to enforce minimum time between reloads
-            }
+            Wasm.reloadWasm();
         }
 
-        // Track latest hash even during debounce
+        // Track latest hash
         last_wasm_hash = value;
     }
 }

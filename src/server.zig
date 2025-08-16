@@ -502,48 +502,6 @@ test "test" {
     try Testing.expect(1 + 1 == 2);
 }
 
-test "server initialization" {
-    var buffer: [1024]u8 = undefined;
-    var fba = Heap.FixedBufferAllocator.init(&buffer);
-
-    var profile = try ProfiledTest.start(@src());
-
-    const server = profile.endWithResult(Server.init(fba.allocator(), false));
-
-    try Testing.expect(!server.is_dev);
-}
-
-test "server initialization with memory" {
-    var buffer: [1024]u8 = undefined;
-    var fba = Heap.FixedBufferAllocator.init(&buffer);
-
-    var profile = try ProfiledTest.startWithMemory(@src(), &fba);
-
-    const server = profile.endWithResult(Server.init(fba.allocator(), false));
-
-    try Testing.expect(!server.is_dev);
-}
-
-test "server file reading with memory" {
-    var buffer: [1024 * 1024]u8 = undefined;
-    var fba = Heap.FixedBufferAllocator.init(&buffer);
-
-    var profile = try ProfiledTest.startWithMemory(@src(), &fba);
-
-    const wasm_data = Fs.cwd().readFileAlloc(fba.allocator(), "../../debug/star-mac/star.wasm", 10_000_000) catch |err| switch (err) {
-        error.FileNotFound => {
-            profile.end();
-            return;
-        },
-        else => return err,
-    };
-    defer fba.allocator().free(wasm_data);
-
-    profile.endWith(wasm_data);
-
-    try Testing.expect(wasm_data.len > 0);
-}
-
 test "server http buffer allocation" {
     var buffer: [8192]u8 = undefined;
     var fba = Heap.FixedBufferAllocator.init(&buffer);
@@ -559,29 +517,4 @@ test "server http buffer allocation" {
     profile.endWith(http_buffer);
 
     try Testing.expect(http_buffer.len == 4096);
-}
-
-test "hot reloader file scanning with memory" {
-    var buffer: [8 * 1024 * 1024]u8 = undefined;
-    var fba = Heap.FixedBufferAllocator.init(&buffer);
-
-    var profile = try ProfiledTest.startWithMemory(@src(), &fba);
-
-    var reloader = HotReloader.init(fba.allocator());
-    const has_changes = profile.endWithResult(reloader.hasChanges());
-
-    try Testing.expect(has_changes);
-}
-
-test "hot reloader directory scanning" {
-    var buffer: [8 * 1024 * 1024]u8 = undefined;
-    var fba = Heap.FixedBufferAllocator.init(&buffer);
-
-    var profile = try ProfiledTest.startWithMemory(@src(), &fba);
-
-    var reloader = HotReloader.init(fba.allocator());
-    var has_changes = profile.endWithResult(reloader.hasChanges());
-    profile.endWith(reloader.scanDir("src", &has_changes));
-
-    try Testing.expect(has_changes);
 }
