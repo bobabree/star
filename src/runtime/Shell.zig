@@ -175,12 +175,16 @@ pub const Shell = enum {
             const is_valid = ShellCmd.isValid(input_line.text());
             if (was_valid != is_valid) {
                 recolorInput();
+            } else if (!is_valid) {
+                // Even if validity didn't change, reapply color for invalid text
+                recolorInput();
             }
         }
     }
 
     fn handleCharInput(byte: u8) void {
         const was_valid = ShellCmd.isValid(input_line.text());
+        const old_cursor = input_line.cursor;
         input_line.insertChar(byte);
         const is_valid = ShellCmd.isValid(input_line.text());
 
@@ -188,6 +192,17 @@ pub const Shell = enum {
         bufAppend(Ansi.bold.code());
         bufAppend(color.code());
         bufAppend(&[_]u8{byte});
+
+        // If not at end, redraw everything after cursor
+        if (old_cursor < input_line.len() - 1) {
+            const text_after = input_line.text()[old_cursor + 1 ..];
+            bufAppend(text_after);
+            // Move cursor back to correct position
+            for (0..text_after.len) |_| {
+                bufAppend(Symbols.BACKSPACE);
+            }
+        }
+
         bufAppend(Ansi.reset.code());
 
         if (was_valid != is_valid) {
@@ -1107,5 +1122,82 @@ test "Bug: backspace doesn't update color when validity changes" {
     }
 
     mockSend(output_buf[0..output_len]);
+    try Testing.expect(test_output.contains("\x1b[31m"));
+}
+test "Bug: display doesn't update when inserting in middle" {
+    var line = InputLine{};
+    test_output.reset();
+
+    line.insertChar('s');
+
+    var output = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
+    output.appendSlice(Ansi.bold.code());
+    output.appendSlice(Ansi.red.code());
+    output.appendSlice("s");
+    output.appendSlice(Ansi.reset.code());
+    mockSend(output.constSlice());
+
+    _ = line.moveCursorLeft();
+    mockSend(Ansi.cursor_back.code());
+
+    const old_cursor = line.cursor;
+    line.insertChar('s');
+
+    output.clear();
+    output.appendSlice(Ansi.bold.code());
+    output.appendSlice(Ansi.red.code());
+    output.appendSlice("s");
+
+    if (old_cursor < line.len() - 1) {
+        const text_after = line.text()[old_cursor + 1 ..];
+        output.appendSlice(text_after);
+        for (0..text_after.len) |_| {
+            output.appendSlice(Symbols.BACKSPACE);
+        }
+    }
+
+    output.appendSlice(Ansi.reset.code());
+    mockSend(output.constSlice());
+
+    try Testing.expectEqualStrings(line.text(), "ss");
+}
+test "Bug: backspace removes color even when validity stays invalid" {
+    var line = InputLine{};
+    test_output.reset();
+
+    line.insertChar('l');
+    line.insertChar('s');
+    line.insertChar('s');
+    try Testing.expect(!ShellCmd.isValid(line.text()));
+
+    line.cursor = 1;
+
+    const text_after = line.text()[line.cursor..];
+    var temp: [Config.INPUT_BUFFER_SIZE]u8 = undefined;
+    @memcpy(temp[0..text_after.len], text_after);
+
+    const was_valid = ShellCmd.isValid(line.text());
+    _ = line.backspace();
+    const is_valid = ShellCmd.isValid(line.text());
+
+    test_output.reset();
+    bufClear();
+    bufAppend(Symbols.BACKSPACE);
+    bufAppend(temp[0..text_after.len]);
+    bufAppend(Symbols.SPACE);
+    bufAppendBackspaces(text_after.len + 1);
+
+    if (was_valid != is_valid or !is_valid) {
+        const color = if (is_valid) Ansi.cyan else Ansi.red;
+        bufAppendBackspaces(line.cursor);
+        bufAppend(Ansi.bold.code());
+        bufAppend(color.code());
+        bufAppend(line.text());
+        bufAppend(Ansi.reset.code());
+        bufAppendBackspaces(line.len() - line.cursor);
+    }
+
+    mockSend(output_buf[0..output_len]);
+
     try Testing.expect(test_output.contains("\x1b[31m"));
 }
