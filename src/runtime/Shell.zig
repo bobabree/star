@@ -4,6 +4,7 @@ const Channel = @import("Channel.zig");
 const Debug = @import("Debug.zig");
 const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
+const Fmt = @import("Fmt.zig");
 const Fs = @import("Fs.zig");
 const IO = @import("IO.zig");
 const Input = @import("Input.zig");
@@ -32,6 +33,7 @@ const Symbols = struct {
 };
 
 // Single threadlocal buffer to avoid allocations
+// TODO: Probably extract these states into a struct
 threadlocal var output_buf: [Config.OUTPUT_BUFFER_SIZE]u8 = undefined;
 threadlocal var output_len: usize = 0;
 
@@ -385,8 +387,19 @@ const ShellHistory = struct {
 
     fn add(self: *ShellHistory, cmd: []const u8) void {
         if (cmd.len == 0) return;
+
         var buf = Utf8Buffer(Config.INPUT_BUFFER_SIZE).init();
         buf.setSlice(cmd);
+
+        // If at capacity, remove oldest command
+        if (self.cmds.len >= Config.HISTORY_SIZE) {
+            var i: usize = 0;
+            while (i < self.cmds.len - 1) : (i += 1) {
+                self.cmds.slice()[i] = self.cmds.slice()[i + 1];
+            }
+            self.cmds.len -= 1;
+        }
+
         self.cmds.append(buf);
         self.index = self.cmds.len;
     }
@@ -479,7 +492,7 @@ pub const ShellCmd = enum {
         var path = Fs.PathBuffer.init();
 
         // Build path by traversing up
-        var indices = FixedBuffer(u8, 32).init(0);
+        var indices = FixedBuffer(u8, Config.MAX_PATH_DEPTH).init(0);
         var current = fileSys.getCurrentDir();
 
         while (current != 0) {
@@ -811,7 +824,7 @@ fn mockSend(text: []const u8) void {
     test_output.capture(text);
 }
 
-test "Bug: first character has no color" {
+test "Bug If: first character has no color" {
     var line = InputLine{};
     test_output.reset();
 
@@ -832,7 +845,7 @@ test "Bug: first character has no color" {
     try Testing.expect(test_output.contains("l")); // Has the character
 }
 
-test "Bug: typing doesn't maintain color" {
+test "Bug If: typing doesn't maintain color" {
     var line = InputLine{};
 
     // Type "ls" - 'l' is red, then 's' makes it cyan
@@ -873,7 +886,7 @@ test "Bug: typing doesn't maintain color" {
     try Testing.expect(test_output.contains("ls"));
 }
 
-test "Bug: recolorInput doesn't restore cursor position" {
+test "Bug If: recolorInput doesn't restore cursor position" {
     var line = InputLine{};
     test_output.reset();
 
@@ -915,7 +928,7 @@ test "Bug: recolorInput doesn't restore cursor position" {
     try Testing.expect(back_count == 5);
 }
 
-test "Bug: replaceInput uses wrong backspace count" {
+test "Bug If: replaceInput uses wrong backspace count" {
     var line = InputLine{};
 
     line.set("café");
@@ -943,7 +956,7 @@ test "Bug: replaceInput uses wrong backspace count" {
     try Testing.expect(line.len() == 4);
 }
 
-test "Bug: cursor position wrong after history navigation" {
+test "Bug If: cursor position wrong after history navigation" {
     var line = InputLine{};
     var history = ShellHistory{};
 
@@ -980,7 +993,7 @@ test "Bug: cursor position wrong after history navigation" {
     try Testing.expect(test_output.contains("very long command"));
 }
 
-test "Bug: backspace doesn't update display correctly" {
+test "Bug If: backspace doesn't update display correctly" {
     var line = InputLine{};
 
     line.set("hello");
@@ -1014,7 +1027,7 @@ test "Bug: backspace doesn't update display correctly" {
     try Testing.expectEqualStrings(test_output.buffer.constSlice(), expected);
 }
 
-test "Bug: cursor position wrong after prompt" {
+test "Bug If: cursor position wrong after prompt" {
     var line = InputLine{};
     test_output.reset();
 
@@ -1030,7 +1043,7 @@ test "Bug: cursor position wrong after prompt" {
     try Testing.expect(test_output.contains("."));
 }
 
-test "Bug: syntax highlighting and prompt overwrite" {
+test "Bug If: syntax highlighting and prompt overwrite" {
     var line = InputLine{};
     test_output.reset();
 
@@ -1048,7 +1061,7 @@ test "Bug: syntax highlighting and prompt overwrite" {
     try Testing.expect(line.text().len == 2);
 }
 
-test "Bug: recolorInput deletes prompt space" {
+test "Bug If: recolorInput deletes prompt space" {
     var line = InputLine{};
     test_output.reset();
 
@@ -1071,7 +1084,7 @@ test "Bug: recolorInput deletes prompt space" {
     try Testing.expect(line.cursor == 2);
 }
 
-test "Bug: command output appears on same line as input" {
+test "Bug If: command output appears on same line as input" {
     test_output.reset();
 
     var line = InputLine{};
@@ -1087,7 +1100,7 @@ test "Bug: command output appears on same line as input" {
     try Testing.expect(output[0] != 'C');
 }
 
-test "Bug: backspace doesn't update color when validity changes" {
+test "Bug If: backspace doesn't update color when validity changes" {
     var line = InputLine{};
     test_output.reset();
 
@@ -1124,7 +1137,7 @@ test "Bug: backspace doesn't update color when validity changes" {
     mockSend(output_buf[0..output_len]);
     try Testing.expect(test_output.contains("\x1b[31m"));
 }
-test "Bug: display doesn't update when inserting in middle" {
+test "Bug If: display doesn't update when inserting in middle" {
     var line = InputLine{};
     test_output.reset();
 
@@ -1161,7 +1174,7 @@ test "Bug: display doesn't update when inserting in middle" {
 
     try Testing.expectEqualStrings(line.text(), "ss");
 }
-test "Bug: backspace removes color even when validity stays invalid" {
+test "Bug If: backspace removes color even when validity stays invalid" {
     var line = InputLine{};
     test_output.reset();
 
@@ -1200,4 +1213,20 @@ test "Bug: backspace removes color even when validity stays invalid" {
     mockSend(output_buf[0..output_len]);
 
     try Testing.expect(test_output.contains("\x1b[31m"));
+}
+
+test "Bug If: shell history crashes after X commands" {
+    var history = ShellHistory{};
+
+    // Add X history
+    for (0..Config.HISTORY_SIZE) |i| {
+        var cmd_buf: [10]u8 = undefined;
+        const cmd = Fmt.bufPrint(&cmd_buf, "cmd{}", .{i}) catch unreachable;
+        history.add(cmd);
+    }
+
+    try Testing.expect(history.cmds.len == Config.HISTORY_SIZE);
+
+    // Bug if adding X+1 history causes panic
+    history.add("cmd33");
 }
