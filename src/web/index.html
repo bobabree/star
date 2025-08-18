@@ -4,6 +4,11 @@
         <meta charset="UTF-8">
         <title>Star Demo</title>
         <link rel="icon" href="data:,">
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        
         <style>
             body{background:#000}
         </style>
@@ -12,6 +17,32 @@
         <js.lib />
         <wasm.lib />
         <script>
+            const manifest = {
+                name: "Star Terminal",
+                short_name: "StarOS",
+                display: "standalone",
+                start_url: window.location.href, 
+                background_color: "#000",
+                icons: [{
+                    src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%2300ff00'/%3E%3C/svg%3E",
+                    sizes: "192x192",
+                    type: "image/svg+xml"
+                }]
+            };
+            const manifestUrl = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest));
+            const link = document.createElement('link');
+            link.rel = 'manifest';
+            link.href = manifestUrl;
+            document.head.appendChild(link);
+        </script>
+        <script>
+            let deferredPrompt;
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                console.log('Install prompt ready - press "i" in terminal to install');
+            });
+
             let threads = [];
             let elements = [null, document.body];  // Preserve DOM
             
@@ -160,6 +191,25 @@
                                 window.term.onData(data => {
                                     for (let i = 0; i < data.length; i++) {
                                         wasmExports.input_key(data.charCodeAt(i));
+                                    }
+                                });
+
+                                window.term.element.addEventListener('click', (e) => {
+                                    const coords = window.term.buffer.active;
+                                    const lineText = window.term.buffer.active.getLine(coords.cursorY)?.translateToString() || '';
+                                    
+                                    if (lineText.includes('[Install]') || lineText.includes('Install')) {
+                                        if (deferredPrompt) {
+                                            deferredPrompt.prompt();
+                                            deferredPrompt.userChoice.then(result => {
+                                                window.term.writeln(`\r\n✅ Install ${result.outcome === 'accepted' ? 'successful!' : 'cancelled'}`);
+                                                deferredPrompt = null;
+                                            });
+                                        } else if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+                                            window.term.writeln('\r\n📱 iOS: Tap Share → Add to Home Screen');
+                                        } else {
+                                            window.term.writeln('\r\n✅ Already installed or not available');
+                                        }
                                     }
                                 });
                             }

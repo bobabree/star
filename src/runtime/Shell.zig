@@ -266,6 +266,15 @@ pub const Shell = enum {
         bufAppend(Ansi.reset.code());
         bufAppend(" to exit.");
         bufAppend(Symbols.NEWLINE);
+
+        // iOS
+        bufAppend(Ansi.underline.code());
+        bufAppend(Ansi.cyan.code());
+        bufAppend("Press this");
+        bufAppend(Ansi.reset.code());
+        bufAppend(" to add to iOS home screen.");
+        bufAppend(Symbols.NEWLINE);
+
         bufSend();
         self.showPrompt();
     }
