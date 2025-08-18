@@ -36,13 +36,6 @@
             document.head.appendChild(link);
         </script>
         <script>
-            let deferredPrompt;
-            window.addEventListener('beforeinstallprompt', (e) => {
-                e.preventDefault();
-                deferredPrompt = e;
-                console.log('Install prompt ready - press "i" in terminal to install');
-            });
-
             let threads = [];
             let elements = [null, document.body];  // Preserve DOM
             
@@ -187,29 +180,27 @@
                                     rows: Math.max(24, Math.min(Math.floor(window.innerHeight / 17), 43))
                                 });
 
+                                window.term.options.linkHandler = {
+                                    activate: (event, text, range) => {
+                                        // Handle iOS installation link
+                                        if (text === 'ios://install') {
+                                            if (window.navigator.standalone) {
+                                                alert('Already installed!');
+                                            } else if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                                                const msg = 'To install:\n1. Tap the Share button (□↑)\n2. Tap "Add to Home Screen"\n';
+                                                alert(msg);
+                                            }
+                                        } else if (text.startsWith('http://') || text.startsWith('https://')) {
+                                            window.open(text, '_blank');
+                                        }
+                                    },
+                                    allowNonHttpProtocols: true
+                                };
+
                                 window.term.open(document.getElementById(s1));
                                 window.term.onData(data => {
                                     for (let i = 0; i < data.length; i++) {
                                         wasmExports.input_key(data.charCodeAt(i));
-                                    }
-                                });
-
-                                window.term.element.addEventListener('click', (e) => {
-                                    const coords = window.term.buffer.active;
-                                    const lineText = window.term.buffer.active.getLine(coords.cursorY)?.translateToString() || '';
-                                    
-                                    if (lineText.includes('[Install]') || lineText.includes('Install')) {
-                                        if (deferredPrompt) {
-                                            deferredPrompt.prompt();
-                                            deferredPrompt.userChoice.then(result => {
-                                                window.term.writeln(`\r\n✅ Install ${result.outcome === 'accepted' ? 'successful!' : 'cancelled'}`);
-                                                deferredPrompt = null;
-                                            });
-                                        } else if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                                            window.term.writeln('\r\n📱 iOS: Tap Share → Add to Home Screen');
-                                        } else {
-                                            window.term.writeln('\r\n✅ Already installed or not available');
-                                        }
                                     }
                                 });
                             }

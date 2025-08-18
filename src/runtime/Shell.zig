@@ -249,6 +249,15 @@ pub const Shell = enum {
         bufSend();
     }
 
+    fn hyperlink(url: []const u8, text: []const u8) void {
+        // OSC 8 escape sequence: ESC ] 8 ; ; URL ESC \ TEXT ESC ] 8 ; ; ESC \
+        bufAppend("\x1b]8;;");
+        bufAppend(url);
+        bufAppend("\x1b\\");
+        bufAppend(text);
+        bufAppend("\x1b]8;;\x1b\\");
+    }
+
     fn showGreeting(comptime self: Shell) void {
         bufClear();
         bufAppend(Ansi.clear_screen.code());
@@ -267,12 +276,12 @@ pub const Shell = enum {
         bufAppend(" to exit.");
         bufAppend(Symbols.NEWLINE);
 
-        // iOS
+        // iOS installation link using OSC 8
         bufAppend(Ansi.underline.code());
         bufAppend(Ansi.cyan.code());
-        bufAppend("Press this");
+        hyperlink("ios://install", "📱 Install to Home Screen");
         bufAppend(Ansi.reset.code());
-        bufAppend(" to add to iOS home screen.");
+        bufAppend(" (iOS only)");
         bufAppend(Symbols.NEWLINE);
 
         bufSend();
