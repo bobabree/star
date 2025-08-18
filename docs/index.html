@@ -220,16 +220,26 @@
                                                 window.matchMedia('(display-mode: fullscreen)').matches;
                                 
                                             if (isInstalled) {
-                                                window.term.write('\r\n✅ Already installed!');
+                                                window.term.write('\r\n\x1b[32m[✓] Already installed!\x1b[0m');
                                             } else if (window.deferredPrompt) {
                                                 window.deferredPrompt.prompt();
                                                 window.deferredPrompt = null;
                                             } else {
-                                                window.term.write('\r\nTo install Star Terminal on iPhone/iPad:\r\n');
-                                                window.term.write('   1. Tap the Share button \r\n');
-                                                window.term.write('   2. Scroll down and tap ');
-                                                window.term.write('\x1b[1;36m"Add to Home Screen"\x1b[0m\r\n');
-                                                window.term.write('\r\nThe app icon will appear on your home screen.\r\n');
+                                                // Check if iOS
+                                                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                                                
+                                                if (isIOS) {
+                                                    window.term.write('\r\nTo install Star Terminal on iPhone/iPad:\r\n');
+                                                    window.term.write('   1. Tap the Share button \r\n');
+                                                    window.term.write('   2. Scroll down and tap ');
+                                                    window.term.write('\x1b[1;36m"Add to Home Screen"\x1b[0m\r\n');
+                                                    window.term.write('\r\nThe app icon will appear on your home screen.');
+                                                } else {
+                                                    window.term.write('\r\nTo install Star Terminal:\r\n');
+                                                    window.term.write('   • Chrome/Edge: Look for install icon in address bar\r\n');
+                                                    window.term.write('   • Firefox: Click ••• menu → Install\r\n');
+                                                    window.term.write('   • Safari: File → Add to Dock');
+                                                }
                                             }
                                             setTimeout(() => wasmExports.input_key(13), 100);
                                         }
