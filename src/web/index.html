@@ -214,7 +214,14 @@
                                 window.term.options.linkHandler = {
                                     activate: (event, text, range) => {
                                         if (text === '//install') {
-                                            if (window.deferredPrompt) {
+                                            // Check if already installed
+                                            const isInstalled = window.navigator.standalone || 
+                                                window.matchMedia('(display-mode: standalone)').matches ||
+                                                window.matchMedia('(display-mode: fullscreen)').matches;
+                                
+                                            if (isInstalled) {
+                                                window.term.write('\r\n✅ Already installed!');
+                                            } else if (window.deferredPrompt) {
                                                 window.deferredPrompt.prompt();
                                                 window.deferredPrompt = null;
                                             } else {

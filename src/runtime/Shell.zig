@@ -279,6 +279,7 @@ pub const Shell = enum {
         // iOS installation link using OSC 8
         if (self == .wasm) {
             bufAppend(Ansi.underline.code());
+            bufAppend(Ansi.italic.code());
             bufAppend(Ansi.cyan.code());
             hyperlink("//install", "Tap here for installation.");
             bufAppend(Ansi.reset.code());
