@@ -7,16 +7,16 @@ Star aims to be a build system and package manager like npm/cargo but for C/C++/
 ```shell
 # C++ JSON library [WIP]
 star install "nlohmann/json/3.11.3"    
-# C compression library 
+# C compression library [WIP]
 star install "lz4/lz4/1.10.0"          
-# Zig compiler
+# Zig compiler [WIP]
 star install "ziglang/zig/0.14.1"     
 
 # Build the 3 above [WIP]
 star build                             
 ```
 
-***[(Demo Only) Star also provides an ultra-lightweight (<1MB) portable OS](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to native systems.***
+***[(Demo Only) Star also provides an ultra-lightweight (<1MB) portable OS and terminal](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to native systems.***
 
 
 ## Platform Support
@@ -25,18 +25,18 @@ star build
 | Platform | Status     |
 |----------|------------|
 | Linux    | 🚧 WIP     |
-| macOS    | 🚧 WIP     |
-| Windows  | 🚧 WIP     |
+| macOS    | ✅         |
+| Windows  | ✅         |
 
 ### Web
 | Platform | Status     |
 |----------|------------|
-| Chrome   | 🚧 WIP     |
+| Chrome   | ✅         |
 | Firefox  | 🚧 WIP     |
-| Safari   | 🚧 WIP     |
+| Safari   | ✅         |
 
 ### Mobile
 | Platform | Status     |
 |----------|------------|
-| iOS      | 🚧 WIP     |
+| iOS      | ✅         |
 | Android  | 📋 Planned |
