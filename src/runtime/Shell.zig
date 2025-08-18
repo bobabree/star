@@ -277,12 +277,13 @@ pub const Shell = enum {
         bufAppend(Symbols.NEWLINE);
 
         // iOS installation link using OSC 8
-        bufAppend(Ansi.underline.code());
-        bufAppend(Ansi.cyan.code());
-        hyperlink("ios://install", "📱 Install to Home Screen");
-        bufAppend(Ansi.reset.code());
-        bufAppend(" (iOS only)");
-        bufAppend(Symbols.NEWLINE);
+        if (self == .wasm) {
+            bufAppend(Ansi.underline.code());
+            bufAppend(Ansi.cyan.code());
+            hyperlink("//install", "Tap here for installation.");
+            bufAppend(Ansi.reset.code());
+            bufAppend(Symbols.NEWLINE);
+        }
 
         bufSend();
         self.showPrompt();

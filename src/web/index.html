@@ -2,9 +2,9 @@
 <html>
     <head>
         <meta charset="UTF-8">
-        <title>Star Demo</title>
-        <link rel="icon" href="data:,">
+        <title>Star</title>
 
+        <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Cpath d='M96 36 L111 79 L159 79 L121 109 L137 152 L96 120 L55 152 L71 109 L33 79 L81 79 Z' fill='none' stroke='%2300FF00' stroke-width='3'/%3E%3C/svg%3E">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,23 +17,47 @@
         <js.lib />
         <wasm.lib />
         <script>
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
             const manifest = {
                 name: "Star Terminal",
                 short_name: "StarOS",
                 display: "standalone",
                 start_url: window.location.href, 
                 background_color: "#000",
-                icons: [{
-                    src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%2300ff00'/%3E%3C/svg%3E",
-                    sizes: "192x192",
-                    type: "image/svg+xml"
-                }]
+                theme_color: "#000",
+                icons: isLocal ? [
+                    {
+                        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%23000'/%3E%3Cpath d='M256 96 L296 211 L424 211 L323 291 L365 405 L256 320 L147 405 L189 291 L88 211 L216 211 Z' fill='none' stroke='%2300FF00' stroke-width='8'/%3E%3C/svg%3E",
+                        sizes: "any",
+                        type: "image/svg+xml",
+                        purpose: "any maskable"
+                    }
+                ] : [
+                    {
+                        src: "https://bobabree.github.io/star/icon-192.png",
+                        sizes: "192x192",
+                        type: "image/png"
+                    },
+                    {
+                        src: "https://bobabree.github.io/star/icon-512.png",
+                        sizes: "512x512",
+                        type: "image/png"
+                    }
+                ]
             };
             const manifestUrl = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest));
             const link = document.createElement('link');
             link.rel = 'manifest';
             link.href = manifestUrl;
             document.head.appendChild(link);
+
+            const appleIcon = document.createElement('link');
+            appleIcon.rel = 'apple-touch-icon';
+            appleIcon.href = isLocal 
+                ? "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Cpath d='M96 36 L111 79 L159 79 L121 109 L137 152 L96 120 L55 152 L71 109 L33 79 L81 79 Z' fill='none' stroke='%2300FF00' stroke-width='3'/%3E%3C/svg%3E"
+                : "https://bobabree.github.io/star/icon-192.png";
+            document.head.appendChild(appleIcon);
         </script>
         <script>
             let threads = [];
@@ -180,18 +204,27 @@
                                     rows: Math.max(24, Math.min(Math.floor(window.innerHeight / 17), 43))
                                 });
 
+                                if (!window.deferredPrompt) {
+                                    window.addEventListener('beforeinstallprompt', (e) => {
+                                        e.preventDefault();
+                                        window.deferredPrompt = e;
+                                    });
+                                }
+
                                 window.term.options.linkHandler = {
                                     activate: (event, text, range) => {
-                                        // Handle iOS installation link
-                                        if (text === 'ios://install') {
-                                            if (window.navigator.standalone) {
-                                                alert('Already installed!');
-                                            } else if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
-                                                const msg = 'To install:\n1. Tap the Share button (□↑)\n2. Tap "Add to Home Screen"\n';
-                                                alert(msg);
+                                        if (text === '//install') {
+                                            if (window.deferredPrompt) {
+                                                window.deferredPrompt.prompt();
+                                                window.deferredPrompt = null;
+                                            } else {
+                                                window.term.write('\r\nTo install Star Terminal on iPhone/iPad:\r\n');
+                                                window.term.write('   1. Tap the Share button \r\n');
+                                                window.term.write('   2. Scroll down and tap ');
+                                                window.term.write('\x1b[1;36m"Add to Home Screen"\x1b[0m\r\n');
+                                                window.term.write('\r\nThe app icon will appear on your home screen.\r\n');
                                             }
-                                        } else if (text.startsWith('http://') || text.startsWith('https://')) {
-                                            window.open(text, '_blank');
+                                            setTimeout(() => wasmExports.input_key(13), 100);
                                         }
                                     },
                                     allowNonHttpProtocols: true
