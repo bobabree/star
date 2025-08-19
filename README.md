@@ -17,9 +17,10 @@ star build
 ```
 
 ***https://bobabree.github.io/star/ - star aims to run identically everywhere from browsers to mobile devices to native OS.***
-To install on any platform, simplfy visit the above link.
+Star should run on most platforms, simplfy visit the above link to try it out.
 
 <img width="1133" height="744" alt="welcome" src="https://github.com/user-attachments/assets/40f46aac-705a-43f1-9749-9d421b16ac66" />
+(star running in iPadOS 2026)
 
 
 ## Platform Support
