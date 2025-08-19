@@ -2,7 +2,7 @@
 
 **A highly ambitious cross-platform C/C++/Zig package manager for Windows, Linux, macOS, Web Browsers, iOS, and Android.**
 
-Star aims to be a build system and package manager like npm/cargo but for C/C++/Zig - a simple package manager for native code across all platforms.
+Star aims to be a build system and package manager like npm/cargo/xcode but for C/C++/Zig - a simple package manager for native code across all platforms.
 
 ```shell
 # C++ JSON library [WIP]
