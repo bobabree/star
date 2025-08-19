@@ -28,7 +28,7 @@ Star should run on most platforms, simplfy visit the above link to try it out.
 ### Operating Systems
 | Platform | Status     |
 |----------|------------|
-| Linux    | 🚧 WIP     |
+| Linux    | ✅         |
 | macOS    | ✅         |
 | Windows  | ✅         |
 
