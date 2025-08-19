@@ -16,7 +16,7 @@ star install "ziglang/zig/0.14.1"
 star build                             
 ```
 
-***[(Demo Only) Star also provides an ultra-lightweight (<1MB) portable OS and terminal](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to mobile devices to native systems.***
+***[(Demo Only) Star also provides an ultra-lightweight (<1MB) portable OS and terminal](https://bobabree.github.io/star/) - that runs identically everywhere from browsers to mobile devices to native OS.***
 
 
 ## Platform Support
