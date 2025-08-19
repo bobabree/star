@@ -16,8 +16,8 @@ star install "ziglang/zig/0.14.1"
 star build                             
 ```
 
-***https://bobabree.github.io/star/ - star runs identically everywhere from browsers to mobile devices to native OS.***
-To install on mobile, simplfy visit the above link on your phone.
+***https://bobabree.github.io/star/ - star aims to run identically everywhere from browsers to mobile devices to native OS.***
+To install on any platform, simplfy visit the above link.
 
 <img width="1133" height="744" alt="welcome" src="https://github.com/user-attachments/assets/40f46aac-705a-43f1-9749-9d421b16ac66" />
 
