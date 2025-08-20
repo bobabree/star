@@ -89,6 +89,12 @@ pub const Shell = enum {
                 self.tick();
             }
         }.callback);
+
+        fileSys.onLoad(struct {
+            fn callback() void {
+                self.showPrompt();
+            }
+        }.callback);
     }
 
     pub fn run(comptime self: Shell) void {
@@ -287,7 +293,6 @@ pub const Shell = enum {
         }
 
         bufSend();
-        self.showPrompt();
     }
 
     fn showPrompt(comptime _: Shell) void {
@@ -673,8 +678,8 @@ pub const ShellCmd = enum {
     fn cmdExit() void {
         // Platform-specific exit
         if (OS.is_wasm) {
-            // TODO: Can't really exit in browser, maybe consider tab exit?
-            IO.stdio.out.send("(Browser tab still open - close manually)\r\n");
+            // TODO: maybe consider tab exit?
+            IO.stdio.out.send("(App still open - close manually)\r\n");
         } else {
             Process.exit(0);
         }

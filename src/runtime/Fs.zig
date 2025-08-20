@@ -5,6 +5,7 @@ const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
+const WasmOp = @import("Wasm.zig").WasmOp;
 
 pub const max_path_bytes = fs.max_path_bytes;
 pub const File = fs.File;
@@ -88,11 +89,13 @@ pub const FileSys = enum {
     }
 
     pub fn run(comptime self: FileSys) void {
-        _ = self;
-        // Future: Load persisted filesystem
+        if (self == .wasm) {
+            _ = WasmOp.load.invoke(.{
+                .key = PERSIST_KEY,
+                .callback_id = 0,
+            });
+        }
     }
-
-    // Public API
 
     pub fn getCurrentDir(comptime self: FileSys) u8 {
         _ = self;
@@ -105,6 +108,7 @@ pub const FileSys = enum {
         const node = fs_data.nodes.get(index);
         if (node.type != .dir) return error.NotADirectory;
         fs_data.current_dir = index;
+        save();
     }
 
     pub fn getNode(comptime self: FileSys, index: u8) ?Node {
@@ -212,7 +216,7 @@ pub const FileSys = enum {
             .first_child = 0,
             .next_sibling = 0,
         };
-
+        save();
         return idx;
     }
 
@@ -222,6 +226,7 @@ pub const FileSys = enum {
         if (index >= fs_data.nodes.len) return error.InvalidIndex;
 
         fs_data.nodes.slice()[index].type = .empty;
+        save();
     }
 
     pub fn linkChild(comptime self: FileSys, parent: u8, child: u8) !void {
@@ -236,6 +241,7 @@ pub const FileSys = enum {
         // Add to front of parent's childrenn list
         fs_data.nodes.slice()[child].next_sibling = fs_data.nodes.get(parent).first_child;
         fs_data.nodes.slice()[parent].first_child = child;
+        save();
     }
 
     pub fn unlinkChild(comptime self: FileSys, parent: u8, child: u8) !void {
@@ -257,6 +263,7 @@ pub const FileSys = enum {
                 }
                 fs_data.nodes.slice()[child].parent = 0;
                 fs_data.nodes.slice()[child].next_sibling = 0;
+                save();
                 return;
             }
             prev = current;
@@ -264,6 +271,115 @@ pub const FileSys = enum {
         }
 
         return error.NotFound;
+    }
+
+    const PERSIST_KEY = "star_fs";
+    const BinaryWriter = struct {
+        buffer: []u8,
+        pos: usize = 0,
+
+        fn writeU8(self: *@This(), value: u8) void {
+            Debug.assert(self.pos + 1 <= self.buffer.len);
+            self.buffer[self.pos] = value;
+            self.pos += 1;
+        }
+
+        fn writeU16(self: *@This(), value: u16) void {
+            Debug.assert(self.pos + 2 <= self.buffer.len);
+            @memcpy(self.buffer[self.pos..][0..2], Mem.asBytes(&value));
+            self.pos += 2;
+        }
+
+        fn writeBytes(self: *@This(), bytes: []const u8) void {
+            Debug.assert(self.pos + bytes.len <= self.buffer.len);
+            @memcpy(self.buffer[self.pos..][0..bytes.len], bytes);
+            self.pos += bytes.len;
+        }
+
+        fn writeStruct(self: *@This(), value: anytype) void {
+            const bytes = Mem.asBytes(&value);
+            self.writeBytes(bytes);
+        }
+    };
+
+    fn serialize() [4096]u8 {
+        var buffer: [4096]u8 = undefined;
+        var writer = BinaryWriter{ .buffer = &buffer };
+
+        writer.pos = 2;
+
+        writer.writeU8(fs_data.current_dir);
+        writer.writeU8(@intCast(fs_data.nodes.len));
+
+        for (fs_data.nodes.constSlice()) |node| {
+            writer.writeStruct(node);
+        }
+
+        writer.writeU16(@intCast(fs_data.names.len));
+        writer.writeBytes(fs_data.names.constSlice());
+
+        // Write length at start
+        @memcpy(buffer[0..2], Mem.asBytes(&@as(u16, @intCast(writer.pos))));
+
+        return buffer;
+    }
+
+    const BinaryReader = struct {
+        data: []const u8,
+        pos: usize = 0,
+
+        fn readU8(self: *@This()) u8 {
+            Debug.assert(self.pos + 1 <= self.data.len);
+            const value = self.data[self.pos];
+            self.pos += 1;
+            return value;
+        }
+
+        fn readU16(self: *@This()) u16 {
+            Debug.assert(self.pos + 2 <= self.data.len);
+            const value = Mem.bytesAsValue(u16, self.data[self.pos..][0..2]).*;
+            self.pos += 2;
+            return value;
+        }
+
+        fn readStruct(self: *@This(), comptime T: type) T {
+            Debug.assert(self.pos + @sizeOf(T) <= self.data.len);
+            const value = Mem.bytesAsValue(T, self.data[self.pos..][0..@sizeOf(T)]).*;
+            self.pos += @sizeOf(T);
+            return value;
+        }
+    };
+
+    fn deserialize(comptime _: FileSys, data: []const u8) void {
+        if (data.len < 3) return;
+
+        var reader = BinaryReader{ .data = data, .pos = 2 };
+
+        fs_data.current_dir = reader.readU8();
+        const nodes_count = reader.readU8();
+
+        fs_data.nodes.resize(nodes_count);
+        for (fs_data.nodes.slice()) |*node| {
+            node.* = reader.readStruct(Node);
+        }
+
+        const names_len = reader.readU16();
+        fs_data.names.resize(names_len);
+        @memcpy(fs_data.names.slice(), reader.data[reader.pos..][0..names_len]);
+    }
+
+    fn save() void {
+        if (!OS.is_wasm) return;
+        const buffer = serialize();
+        const len = Mem.bytesAsValue(u16, buffer[0..2]).*;
+        _ = WasmOp.save.invoke(.{
+            .key = PERSIST_KEY,
+            .data = buffer[0..len],
+        });
+    }
+
+    pub fn onLoad(comptime _: FileSys, callback: *const fn () void) void {
+        load_callback = callback;
     }
 };
 
@@ -277,3 +393,14 @@ else switch (builtin.target.os.tag) {
     .windows => .windows,
     else => @compileError("Unsupported filesystem platform"),
 };
+
+var load_callback: ?*const fn () void = null;
+export fn fs_callback(callback_id: u32, ptr: [*]const u8, len: u32) void {
+    _ = callback_id;
+    if (len > 0) {
+        fileSys.deserialize(ptr[0..len]);
+    }
+    if (load_callback) |callback| {
+        callback();
+    }
+}

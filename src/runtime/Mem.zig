@@ -3,6 +3,8 @@ const Math = @import("Math.zig");
 
 pub const Alignment = mem.Alignment;
 pub const Allocator = mem.Allocator;
+pub const asBytes = mem.asBytes;
+pub const bytesAsValue = mem.bytesAsValue;
 pub const copyBackwards = mem.copyBackwards;
 pub const doNotOptimizeAway = mem.doNotOptimizeAway;
 pub const endsWith = mem.endsWith;

@@ -148,6 +148,8 @@ pub const WasmOp = enum(u32) {
     fetch = 7,
     sleep = 8,
     reloadWasm = 9,
+    save = 10,
+    load = 11,
 
     pub fn invoke(comptime self: WasmOp, args: anytype) u32 {
         return switch (self) {
@@ -161,6 +163,8 @@ pub const WasmOp = enum(u32) {
             .fetch => wasm_op(@intFromEnum(self), args.callback_id, args.url.ptr, @intCast(args.url.len), args.method.ptr, @intCast(args.method.len)),
             .sleep => wasm_op(@intFromEnum(self), args.ms, null, args.func_id, null, 0),
             .reloadWasm => wasm_op(@intFromEnum(self), 0, null, 0, null, 0),
+            .save => wasm_op(@intFromEnum(self), 0, args.key.ptr, @intCast(args.key.len), args.data.ptr, @intCast(args.data.len)),
+            .load => wasm_op(@intFromEnum(self), args.callback_id, args.key.ptr, @intCast(args.key.len), null, 0),
         };
     }
 };

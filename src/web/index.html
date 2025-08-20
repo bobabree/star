@@ -307,6 +307,55 @@
                             }
                             return 0;
 
+                        case 10: // save
+                            const key = s1;
+                            const data = new Uint8Array(wasmExports.memory.buffer, ptr2, len2);
+                            
+                            (async () => {
+                                const req = indexedDB.open('StarOS', 1);
+                                req.onupgradeneeded = e => {
+                                    const db = e.target.result;
+                                    if (!db.objectStoreNames.contains('fs'))
+                                        db.createObjectStore('fs');
+                                };
+                                req.onsuccess = () => {
+                                    const db = req.result;
+                                    const tx = db.transaction(['fs'], 'readwrite');
+                                    tx.objectStore('fs').put(data, key);
+                                    tx.oncomplete = () => db.close();
+                                };
+                            })();
+                            return 0;
+    
+                    case 11: // load  
+                        const loadKey = s1;
+                        const callback_id = id;
+                        
+                        const req = indexedDB.open('StarOS', 1);
+                        req.onupgradeneeded = e => {
+                            const db = e.target.result;
+                            if (!db.objectStoreNames.contains('fs'))
+                                db.createObjectStore('fs');
+                        };
+                        req.onsuccess = () => {
+                            const db = req.result;
+                            const tx = db.transaction(['fs'], 'readonly');
+                            const get = tx.objectStore('fs').get(loadKey);
+                            get.onsuccess = () => {
+                                const data = get.result;
+                                if (data) {
+                                    const bytes = new Uint8Array(data);
+                                    const ptr = wasmExports.memory.buffer.byteLength - bytes.length;
+                                    new Uint8Array(wasmExports.memory.buffer).set(bytes, ptr);
+                                    wasmExports.fs_callback(callback_id, ptr, bytes.length);
+                                } else {
+                                    wasmExports.fs_callback(callback_id, 0, 0);
+                                }
+                                db.close();
+                            };
+                        };
+                        return 0;
+
                         default:
                             return 0;
                     }
