@@ -95,7 +95,7 @@ export fn sleep_callback(func_id: u32) void {
 }
 
 var last_wasm_hash: u32 = 0;
-export fn fetch_callback(callback_id: u32, value: u32) void {
+export fn reload_wasm_callback(callback_id: u32, value: u32) void {
     if (callback_id == FETCH_WASM_SIZE) {
         if (last_wasm_hash != 0 and value != last_wasm_hash) {
             Wasm.reloadWasm();

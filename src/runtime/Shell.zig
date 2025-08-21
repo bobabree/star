@@ -11,6 +11,7 @@ const Input = @import("Input.zig");
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
 const Process = @import("Process.zig");
+const WasmOp = @import("Wasm.zig").WasmOp;
 
 const fileSys = Fs.fileSys;
 
@@ -452,6 +453,9 @@ const ShellHistory = struct {
 };
 
 pub const ShellCmd = enum {
+    fetch,
+    cat,
+
     ls,
     pwd,
     cd,
@@ -471,6 +475,9 @@ pub const ShellCmd = enum {
             trimmed[0..space_idx]
         else
             trimmed;
+
+        if (Mem.eql(u8, command, "fetch")) return .fetch;
+        if (Mem.eql(u8, command, "cat")) return .cat;
 
         if (Mem.eql(u8, command, "ls")) return .ls;
         if (Mem.eql(u8, command, "pwd")) return .pwd;
@@ -500,6 +507,8 @@ pub const ShellCmd = enum {
         }
 
         switch (self) {
+            .fetch => if (trimmed.len > 5) cmdFetch(Mem.trim(u8, trimmed[5..], Symbols.WHITESPACE)),
+            .cat => if (trimmed.len > 4) cmdCat(Mem.trim(u8, trimmed[4..], Symbols.WHITESPACE)),
             .ls => cmdLs(),
             .pwd => cmdPwd(),
             .cd => if (trimmed.len > 3) cmdCd(Mem.trim(u8, trimmed[3..], Symbols.WHITESPACE ++ "/")),
@@ -510,6 +519,54 @@ pub const ShellCmd = enum {
             .help => cmdHelp(),
             .exit => cmdExit(),
             .unknown => cmdUnknown(cmd),
+        }
+    }
+
+    fn cmdFetch(url: []const u8) void {
+        var filename_start: usize = 0;
+        for (url, 0..) |c, i| {
+            if (c == '/') filename_start = i + 1;
+        }
+        const filename = if (filename_start < url.len) url[filename_start..] else "download";
+
+        const current = fileSys.getCurrentDir();
+        const file_idx = fileSys.createNode(.file, filename) catch {
+            IO.stdio.out.send("fetch: failed to create file\r\n");
+            return;
+        };
+        fileSys.linkChild(current, file_idx) catch {};
+
+        fetch_file_idx = file_idx;
+
+        var proxy_url: [512]u8 = undefined;
+        const full_url = Fmt.bufPrint(&proxy_url, "https://corsproxy.io/?{s}", .{url}) catch url;
+
+        _ = WasmOp.fetch.invoke(.{
+            .url = full_url,
+            .method = "GET",
+            .callback_id = 100,
+        });
+
+        IO.stdio.out.send("Downloading...\r\n");
+    }
+
+    fn cmdCat(name: []const u8) void {
+        const current = fileSys.getCurrentDir();
+        if (fileSys.findChild(current, name)) |child| {
+            const node = fileSys.getNode(child) orelse return;
+            if (node.content_id > 0) {
+                var key_buf: [32]u8 = undefined;
+                const key = Fmt.bufPrint(&key_buf, "file_{}", .{node.content_id}) catch return;
+
+                _ = WasmOp.load.invoke(.{
+                    .key = key,
+                    .callback_id = 200,
+                });
+            } else {
+                IO.stdio.out.send("cat: file is empty\r\n");
+            }
+        } else {
+            IO.stdio.out.send("cat: file not found\r\n");
         }
     }
 
@@ -694,6 +751,32 @@ pub const ShellCmd = enum {
         IO.stdio.out.send("\r\n");
     }
 };
+
+var fetch_file_idx: u8 = 0;
+export fn fetch_callback(content_id: u32, size: u32) void {
+    if (size == 0) {
+        IO.stdio.out.send("fetch: download failed\r\n");
+
+        fileSys.unlinkChild(fileSys.getCurrentDir(), fetch_file_idx) catch |err| {
+            IO.stdio.out.sendErr("fetch: cleanup failed", err);
+        };
+
+        fileSys.deleteNode(fetch_file_idx) catch |err| {
+            IO.stdio.out.sendErr("fetch: cleanup failed", err);
+        };
+    } else {
+        fileSys.updateNode(fetch_file_idx, content_id, size);
+
+        var msg: [256]u8 = undefined;
+        const text = Fmt.bufPrint(&msg, "Downloaded {} bytes\r\n", .{size}) catch "Downloaded\r\n";
+        IO.stdio.out.send(text);
+    }
+    shell.showPrompt();
+}
+
+export fn cmd_callback() void {
+    shell.showPrompt();
+}
 
 pub const Ansi = enum {
     // Foreground colors

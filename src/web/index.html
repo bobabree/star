@@ -266,6 +266,40 @@
                         case 7: // fetch
                             const url = s1;
                             const method = s2;
+
+                            if (id === 100) { // fetch
+                                fetch(url)
+                                    .then(r => {
+                                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                                        return r.arrayBuffer();
+                                    })
+                                    .then(data => {
+                                        const bytes = new Uint8Array(data);
+                                        const contentId = Date.now() >>> 0; 
+                                        
+                                        const req = indexedDB.open('StarOS', 1);
+                                        req.onupgradeneeded = e => {
+                                            const db = e.target.result;
+                                            if (!db.objectStoreNames.contains('fs'))
+                                                db.createObjectStore('fs');
+                                        };
+                                        req.onsuccess = () => {
+                                            const db = req.result;
+                                            const tx = db.transaction(['fs'], 'readwrite');
+                                            tx.objectStore('fs').put(bytes, 'file_' + contentId);
+                                            tx.oncomplete = () => {
+                                                db.close();
+                                                wasmExports.fetch_callback(contentId, bytes.length);
+                                            };
+                                        };
+                                    })
+                                    .catch(err => {
+                                        console.error('Download failed:', err);
+                                        wasmExports.fetch_callback(0, 0); // Signal failure
+                                    });
+                                return 0;
+                            }
+
                             const fetchUrl = location.origin + '/star.wasm?check=' + Date.now();
                             fetch(fetchUrl, { method: method })
                                 .then(r => {
@@ -283,11 +317,11 @@
                                     
                                     // Combine size and hash with XOR
                                     const value = (size ^ hash) >>> 0;
-                                    wasmExports.fetch_callback(id, value);
+                                    wasmExports.reload_wasm_callback(id, value);
                                 })
                                 .catch(err => {
                                     console.error('Fetch error:', err);
-                                    wasmExports.fetch_callback(id, 0);
+                                    wasmExports.reload_wasm_callback(id, 0);
                                 });
                             return 0;
 
@@ -312,20 +346,6 @@
                             const data = new Uint8Array(wasmExports.memory.buffer, ptr2, len2);
                             
                             (async () => {
-                                try {
-                                    if ('storage' in navigator && 'getDirectory' in navigator.storage) {
-                                        const root = await navigator.storage.getDirectory();
-                                        const file = await root.getFileHandle(key, { create: true });
-                                        const writable = await file.createWritable();
-                                        await writable.write(data);
-                                        await writable.close();
-                                        return;
-                                    }
-                                } catch (e) {
-                                    console.warn('OPFS save failed, using IndexedDB:', e);
-                                }
-                                
-                                // Fallback to IndexDB
                                 const req = indexedDB.open('StarOS', 1);
                                 req.onupgradeneeded = e => {
                                     const db = e.target.result;
@@ -340,64 +360,70 @@
                                 };
                             })();
                             return 0;
-
+    
                         case 11: // load  
                             const loadKey = s1;
-                            const callback_id = id;
-                            
-                            (async () => {
-                                let data = null;
+                            const callback_id = id;                        
+                            const req = indexedDB.open('StarOS', 1);
+                            req.onupgradeneeded = e => {
+                                const db = e.target.result;
+                                if (!db.objectStoreNames.contains('fs'))
+                                    db.createObjectStore('fs');
+                            };
+                            req.onsuccess = () => {
+                                const db = req.result;
+                                const tx = db.transaction(['fs'], 'readonly');
+                                const getReq = tx.objectStore('fs').get(loadKey);
                                 
-                                try {
-                                    if ('storage' in navigator && 'getDirectory' in navigator.storage) {
-                                        const root = await navigator.storage.getDirectory();
-                                        const file = await root.getFileHandle(loadKey, { create: false });
-                                        const fileData = await file.getFile();
-                                        const arrayBuffer = await fileData.arrayBuffer();
-                                        data = new Uint8Array(arrayBuffer);
-                                    }
-                                } catch (e) {
-                                    // File doesn't exist or OPFS not available
-                                }
-                                
-                                if (data) {
-                                    // OPFs succeeded
-                                    const ptr = wasmExports.memory.buffer.byteLength - data.length;
-                                    new Uint8Array(wasmExports.memory.buffer).set(data, ptr);
-                                    wasmExports.fs_callback(callback_id, ptr, data.length);
-                                    console.log('%c● OPFS', 'color: #00ff00');
-                                } else {
-                                    // Try IndexDB
-                                    const req = indexedDB.open('StarOS', 1);
-                                    req.onupgradeneeded = e => {
-                                        const db = e.target.result;
-                                        if (!db.objectStoreNames.contains('fs'))
-                                            db.createObjectStore('fs');
-                                    };
-                                    req.onsuccess = () => {
-                                        const db = req.result;
-                                        const tx = db.transaction(['fs'], 'readonly');
-                                        const get = tx.objectStore('fs').get(loadKey);
-                                        get.onsuccess = () => {
-                                            const result = get.result;
-                                            if (result) {
-                                                const bytes = new Uint8Array(result);
+                                getReq.onsuccess = () => {
+                                    try {
+                                        const data = getReq.result;
+                                        if (data) {
+                                            const bytes = new Uint8Array(data);
+                                            
+                                            if (callback_id === 200) { // cmd command
+                                                const text = new TextDecoder().decode(bytes);
+                                                if (window.term) window.term.write(text + '\r\n');
+                                                wasmExports.cmd_callback();
+                                            } else {
                                                 const ptr = wasmExports.memory.buffer.byteLength - bytes.length;
                                                 new Uint8Array(wasmExports.memory.buffer).set(bytes, ptr);
                                                 wasmExports.fs_callback(callback_id, ptr, bytes.length);
+                                            }
+                                        } else {
+                                            if (callback_id === 200) {
+                                                if (window.term) window.term.write('cat: file not found\r\n');
+                                                wasmExports.cmd_callback();
                                             } else {
                                                 wasmExports.fs_callback(callback_id, 0, 0);
                                             }
-                                            console.log('%c● IndexedDB', 'color: #00ff00');
-                                            db.close();
+                                        }
+                                        db.close();
+                                    } catch (err) {
+                                        console.error('Load operation failed:', err);
+                                        db.close();
+
+                                        indexedDB.deleteDatabase('StarOS').onsuccess = () => {
+                                            if (window.term) window.term.write('Database corrupted and resetted.\r\n');
+                                            if (callback_id === 200) {
+                                                wasmExports.cmd_callback();
+                                            } else {
+                                                wasmExports.fs_callback(callback_id, 0, 0);
+                                            }
                                         };
-                                        get.onerror = () => {
-                                            wasmExports.fs_callback(callback_id, 0, 0);
-                                            db.close();
-                                        };
-                                    };
-                                }
-                            })();
+                                    }
+                                };
+                                
+                                getReq.onerror = () => {
+                                    console.error('Failed to read from IndexedDB');
+                                    wasmExports.fs_callback(callback_id, 0, 0);
+                                    db.close();
+                                };
+                            };
+                            req.onerror = () => {
+                                console.error('Failed to open IndexedDB');
+                                wasmExports.fs_callback(callback_id, 0, 0);
+                            };
                             return 0;
 
                         default:

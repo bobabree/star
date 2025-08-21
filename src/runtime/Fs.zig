@@ -38,6 +38,8 @@ pub const Node = struct {
     parent: u8 = 0,
     first_child: u8 = 0,
     next_sibling: u8 = 0,
+    content_id: u32 = 0,
+    size: u32 = 0,
 
     pub fn isEmpty(self: Node) bool {
         return self.type == .empty;
@@ -220,6 +222,14 @@ pub const FileSys = enum {
         return idx;
     }
 
+    pub fn updateNode(comptime self: FileSys, index: u8, content_id: u32, size: u32) void {
+        _ = self;
+        if (index >= fs_data.nodes.len) return;
+        fs_data.nodes.slice()[index].content_id = content_id;
+        fs_data.nodes.slice()[index].size = size;
+        save();
+    }
+
     pub fn deleteNode(comptime self: FileSys, index: u8) !void {
         _ = self;
         if (index == 0) return error.CannotDeleteRoot;
@@ -397,9 +407,11 @@ else switch (builtin.target.os.tag) {
 var load_callback: ?*const fn () void = null;
 export fn fs_callback(callback_id: u32, ptr: [*]const u8, len: u32) void {
     _ = callback_id;
-    if (len > 0) {
+
+    if (len > 0 and len < 4096) {
         fileSys.deserialize(ptr[0..len]);
     }
+
     if (load_callback) |callback| {
         callback();
     }

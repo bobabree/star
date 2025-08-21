@@ -137,6 +137,7 @@ const wasm_op = if (OS.is_wasm) struct {
     }
 }).f;
 
+// TODO: type safety
 pub const WasmOp = enum(u32) {
     log = 0,
     warn = 1,
