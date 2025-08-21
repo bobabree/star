@@ -312,6 +312,20 @@
                             const data = new Uint8Array(wasmExports.memory.buffer, ptr2, len2);
                             
                             (async () => {
+                                try {
+                                    if ('storage' in navigator && 'getDirectory' in navigator.storage) {
+                                        const root = await navigator.storage.getDirectory();
+                                        const file = await root.getFileHandle(key, { create: true });
+                                        const writable = await file.createWritable();
+                                        await writable.write(data);
+                                        await writable.close();
+                                        return;
+                                    }
+                                } catch (e) {
+                                    console.warn('OPFS save failed, using IndexedDB:', e);
+                                }
+                                
+                                // Fallback to IndexDB
                                 const req = indexedDB.open('StarOS', 1);
                                 req.onupgradeneeded = e => {
                                     const db = e.target.result;
@@ -326,35 +340,65 @@
                                 };
                             })();
                             return 0;
-    
-                    case 11: // load  
-                        const loadKey = s1;
-                        const callback_id = id;
-                        
-                        const req = indexedDB.open('StarOS', 1);
-                        req.onupgradeneeded = e => {
-                            const db = e.target.result;
-                            if (!db.objectStoreNames.contains('fs'))
-                                db.createObjectStore('fs');
-                        };
-                        req.onsuccess = () => {
-                            const db = req.result;
-                            const tx = db.transaction(['fs'], 'readonly');
-                            const get = tx.objectStore('fs').get(loadKey);
-                            get.onsuccess = () => {
-                                const data = get.result;
-                                if (data) {
-                                    const bytes = new Uint8Array(data);
-                                    const ptr = wasmExports.memory.buffer.byteLength - bytes.length;
-                                    new Uint8Array(wasmExports.memory.buffer).set(bytes, ptr);
-                                    wasmExports.fs_callback(callback_id, ptr, bytes.length);
-                                } else {
-                                    wasmExports.fs_callback(callback_id, 0, 0);
+
+                        case 11: // load  
+                            const loadKey = s1;
+                            const callback_id = id;
+                            
+                            (async () => {
+                                let data = null;
+                                
+                                try {
+                                    if ('storage' in navigator && 'getDirectory' in navigator.storage) {
+                                        const root = await navigator.storage.getDirectory();
+                                        const file = await root.getFileHandle(loadKey, { create: false });
+                                        const fileData = await file.getFile();
+                                        const arrayBuffer = await fileData.arrayBuffer();
+                                        data = new Uint8Array(arrayBuffer);
+                                    }
+                                } catch (e) {
+                                    // File doesn't exist or OPFS not available
                                 }
-                                db.close();
-                            };
-                        };
-                        return 0;
+                                
+                                if (data) {
+                                    // OPFs succeeded
+                                    const ptr = wasmExports.memory.buffer.byteLength - data.length;
+                                    new Uint8Array(wasmExports.memory.buffer).set(data, ptr);
+                                    wasmExports.fs_callback(callback_id, ptr, data.length);
+                                    console.log('%c● OPFS', 'color: #00ff00');
+                                } else {
+                                    // Try IndexDB
+                                    const req = indexedDB.open('StarOS', 1);
+                                    req.onupgradeneeded = e => {
+                                        const db = e.target.result;
+                                        if (!db.objectStoreNames.contains('fs'))
+                                            db.createObjectStore('fs');
+                                    };
+                                    req.onsuccess = () => {
+                                        const db = req.result;
+                                        const tx = db.transaction(['fs'], 'readonly');
+                                        const get = tx.objectStore('fs').get(loadKey);
+                                        get.onsuccess = () => {
+                                            const result = get.result;
+                                            if (result) {
+                                                const bytes = new Uint8Array(result);
+                                                const ptr = wasmExports.memory.buffer.byteLength - bytes.length;
+                                                new Uint8Array(wasmExports.memory.buffer).set(bytes, ptr);
+                                                wasmExports.fs_callback(callback_id, ptr, bytes.length);
+                                            } else {
+                                                wasmExports.fs_callback(callback_id, 0, 0);
+                                            }
+                                            console.log('%c● IndexedDB', 'color: #00ff00');
+                                            db.close();
+                                        };
+                                        get.onerror = () => {
+                                            wasmExports.fs_callback(callback_id, 0, 0);
+                                            db.close();
+                                        };
+                                    };
+                                }
+                            })();
+                            return 0;
 
                         default:
                             return 0;
