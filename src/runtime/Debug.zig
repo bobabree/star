@@ -217,9 +217,9 @@ const Scope = enum(u8) {
         const args = .{ .msg = console_msg.constSlice(), .style = style.constSlice() };
 
         _ = switch (message_level) {
-            .err => Wasm.WasmOp.err.invoke(args),
-            .warn => Wasm.WasmOp.warn.invoke(args),
-            else => Wasm.WasmOp.log.invoke(args),
+            .err => Wasm.err(args.msg, args.style),
+            .warn => Wasm.warn(args.msg, args.style),
+            else => Wasm.log(args.msg, args.style),
         };
     }
 

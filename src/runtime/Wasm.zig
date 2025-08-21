@@ -34,76 +34,96 @@ const DomOp = enum(u32) {
     addHeadElement = 10,
     getElementById = 11,
 
-    pub fn invoke(comptime self: DomOp, args: anytype) u32 {
-        return switch (self) {
-            .createElement => dom_op(@intFromEnum(self), 0, args.tag.ptr, @intCast(args.tag.len), null, 0),
-            .appendChild => dom_op(@intFromEnum(self), args.parent_id, @ptrFromInt(@as(usize, args.child_id)), 0, null, 0),
-            .setAttribute => dom_op(@intFromEnum(self), args.id, args.name.ptr, @intCast(args.name.len), args.value.ptr, @intCast(args.value.len)),
-            .addEventListener => dom_op(@intFromEnum(self), args.id, args.event.ptr, @intCast(args.event.len), @ptrFromInt(@as(usize, args.callback_id)), 0),
-            .getValue => dom_op(@intFromEnum(self), args.id, null, 0, args.buffer.ptr, @intCast(args.buffer.len)),
-            .setInnerHTML => dom_op(@intFromEnum(self), args.id, args.html.ptr, @intCast(args.html.len), null, 0),
-            .setTextContent => dom_op(@intFromEnum(self), args.id, args.text.ptr, @intCast(args.text.len), null, 0),
-            .setClassName => dom_op(@intFromEnum(self), args.id, args.class_name.ptr, @intCast(args.class_name.len), null, 0),
-            .setId => dom_op(@intFromEnum(self), args.id, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
-            .setTitle => dom_op(@intFromEnum(self), 0, args.title.ptr, @intCast(args.title.len), null, 0),
-            .addHeadElement => dom_op(@intFromEnum(self), 0, args.content.ptr, @intCast(args.content.len), args.element_type.ptr, @intCast(args.element_type.len)),
-            .getElementById => dom_op(@intFromEnum(self), 0, args.id.ptr, @intCast(args.id.len), null, 0),
+    pub const Args = union(DomOp) {
+        createElement: struct { tag: []const u8 },
+        appendChild: struct { parent_id: u32, child_id: u32 },
+        setAttribute: struct { id: u32, name: []const u8, value: []const u8 },
+        addEventListener: struct { id: u32, event: []const u8, callback_id: u32 },
+        getValue: struct { id: u32, buffer: []u8 },
+        setInnerHTML: struct { id: u32, html: []const u8 },
+        setTextContent: struct { id: u32, text: []const u8 },
+        setClassName: struct { id: u32, class_name: []const u8 },
+        setId: struct { id: u32, element_id: []const u8 },
+        setTitle: struct { title: []const u8 },
+        addHeadElement: struct { content: []const u8, element_type: []const u8 },
+        getElementById: struct { id: []const u8 },
+    };
+
+    pub fn call(args: Args) u32 {
+        return switch (args) {
+            .createElement => |a| dom_op(0, 0, a.tag.ptr, @intCast(a.tag.len), null, 0),
+            .appendChild => |a| dom_op(1, a.parent_id, @ptrFromInt(@as(usize, a.child_id)), 0, null, 0),
+            .setAttribute => |a| dom_op(2, a.id, a.name.ptr, @intCast(a.name.len), a.value.ptr, @intCast(a.value.len)),
+            .addEventListener => |a| dom_op(3, a.id, a.event.ptr, @intCast(a.event.len), @ptrFromInt(@as(usize, a.callback_id)), 0),
+            .getValue => |a| dom_op(4, a.id, null, 0, a.buffer.ptr, @intCast(a.buffer.len)),
+            .setInnerHTML => |a| dom_op(5, a.id, a.html.ptr, @intCast(a.html.len), null, 0),
+            .setTextContent => |a| dom_op(6, a.id, a.text.ptr, @intCast(a.text.len), null, 0),
+            .setClassName => |a| dom_op(7, a.id, a.class_name.ptr, @intCast(a.class_name.len), null, 0),
+            .setId => |a| dom_op(8, a.id, a.element_id.ptr, @intCast(a.element_id.len), null, 0),
+            .setTitle => |a| dom_op(9, 0, a.title.ptr, @intCast(a.title.len), null, 0),
+            .addHeadElement => |a| dom_op(10, 0, a.content.ptr, @intCast(a.content.len), a.element_type.ptr, @intCast(a.element_type.len)),
+            .getElementById => |a| dom_op(11, 0, a.id.ptr, @intCast(a.id.len), null, 0),
         };
     }
 };
 
 fn createElement(tag: []const u8) u32 {
-    return DomOp.createElement.invoke(.{ .tag = tag });
+    return DomOp.call(.{ .createElement = .{ .tag = tag } });
 }
 
 fn appendChild(parent_id: u32, child_id: u32) void {
-    _ = DomOp.appendChild.invoke(.{ .parent_id = parent_id, .child_id = child_id });
+    _ = DomOp.call(.{ .appendChild = .{ .parent_id = parent_id, .child_id = child_id } });
 }
 
 fn setAttribute(id: u32, name: []const u8, value: []const u8) void {
-    _ = DomOp.setAttribute.invoke(.{ .id = id, .name = name, .value = value });
+    _ = DomOp.call(.{ .setAttribute = .{ .id = id, .name = name, .value = value } });
 }
 
 fn addEventListener(id: u32, event: []const u8, callback_id: u32) void {
-    _ = DomOp.addEventListener.invoke(.{ .id = id, .event = event, .callback_id = callback_id });
+    _ = DomOp.call(.{ .addEventListener = .{ .id = id, .event = event, .callback_id = callback_id } });
 }
 
 fn getValue(id: u32, buffer: []u8) []u8 {
-    const len = DomOp.getValue.invoke(.{ .id = id, .buffer = buffer });
+    const len = DomOp.call(.{ .getValue = .{ .id = id, .buffer = buffer } });
     return buffer[0..len];
 }
 
 fn setInnerHTML(id: u32, html: []const u8) void {
-    _ = DomOp.setInnerHTML.invoke(.{ .id = id, .html = html });
+    _ = DomOp.call(.{ .setInnerHTML = .{ .id = id, .html = html } });
 }
 
 fn setTextContent(id: u32, text: []const u8) void {
-    _ = DomOp.setTextContent.invoke(.{ .id = id, .text = text });
+    _ = DomOp.call(.{ .setTextContent = .{ .id = id, .text = text } });
 }
 
 fn setClassName(id: u32, class_name: []const u8) void {
-    _ = DomOp.setClassName.invoke(.{ .id = id, .class_name = class_name });
+    _ = DomOp.call(.{ .setClassName = .{ .id = id, .class_name = class_name } });
 }
 
 fn setId(id: u32, element_id: []const u8) void {
-    _ = DomOp.setId.invoke(.{ .id = id, .element_id = element_id });
+    _ = DomOp.call(.{ .setId = .{ .id = id, .element_id = element_id } });
 }
 
 fn setTitle(title: []const u8) void {
-    _ = DomOp.setTitle.invoke(.{ .title = title });
+    _ = DomOp.call(.{ .setTitle = .{ .title = title } });
 }
 
 fn addStyleSheet(css: []const u8) void {
-    _ = DomOp.addHeadElement.invoke(.{ .content = css, .element_type = "style" });
+    _ = DomOp.call(.{ .addHeadElement = .{ .content = css, .element_type = "style" } });
 }
 
 fn addJsLib(content: []const u8) void {
-    _ = DomOp.addHeadElement.invoke(.{ .content = content, .element_type = "script" });
+    _ = DomOp.call(.{ .addHeadElement = .{ .content = content, .element_type = "script" } });
+}
+
+pub fn getElementById(id: []const u8) ?u32 {
+    const index = DomOp.call(.{ .getElementById = .{ .id = id } });
+    return if (index == 0) null else index;
 }
 
 pub fn linkLibs(allocator: Allocator) !void {
-    linkJsLib(allocator) catch |err| {
-        Debug.wasm.err("Failed to link js.lib: {}", .{err});
+    linkJsLib(allocator) catch |e| {
+        Debug.wasm.err("Failed to link js.lib: {}", .{e});
     };
 
     // TODO: Link Wasm libs if needed in the future
@@ -124,11 +144,6 @@ fn linkJsLib(allocator: Allocator) !void {
     _ = addJsLib(decompressed[0..out_stream.pos]);
 }
 
-pub fn getElementById(id: []const u8) ?u32 {
-    const index = DomOp.getElementById.invoke(.{ .id = id });
-    return if (index == 0) null else index;
-}
-
 const wasm_op = if (OS.is_wasm) struct {
     extern fn wasm_op(op: u32, id: u32, ptr1: ?[*]const u8, len1: u32, ptr2: ?[*]const u8, len2: u32) u32;
 }.wasm_op else (struct {
@@ -137,7 +152,6 @@ const wasm_op = if (OS.is_wasm) struct {
     }
 }).f;
 
-// TODO: type safety
 pub const WasmOp = enum(u32) {
     log = 0,
     warn = 1,
@@ -152,50 +166,85 @@ pub const WasmOp = enum(u32) {
     save = 10,
     load = 11,
 
-    pub fn invoke(comptime self: WasmOp, args: anytype) u32 {
-        return switch (self) {
-            .log => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .warn => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .err => wasm_op(@intFromEnum(self), 0, args.msg.ptr, @intCast(args.msg.len), args.style.ptr, @intCast(args.style.len)),
-            .createThread => wasm_op(@intFromEnum(self), args.func_id, null, 0, null, 0),
-            .threadJoin => wasm_op(@intFromEnum(self), args.thread_id, null, 0, null, 0),
-            .terminalInit => wasm_op(@intFromEnum(self), 0, args.element_id.ptr, @intCast(args.element_id.len), null, 0),
-            .terminalWrite => wasm_op(@intFromEnum(self), 0, args.text.ptr, @intCast(args.text.len), null, 0),
-            .fetch => wasm_op(@intFromEnum(self), args.callback_id, args.url.ptr, @intCast(args.url.len), args.method.ptr, @intCast(args.method.len)),
-            .sleep => wasm_op(@intFromEnum(self), args.ms, null, args.func_id, null, 0),
-            .reloadWasm => wasm_op(@intFromEnum(self), 0, null, 0, null, 0),
-            .save => wasm_op(@intFromEnum(self), 0, args.key.ptr, @intCast(args.key.len), args.data.ptr, @intCast(args.data.len)),
-            .load => wasm_op(@intFromEnum(self), args.callback_id, args.key.ptr, @intCast(args.key.len), null, 0),
+    pub const Args = union(WasmOp) {
+        log: struct { msg: []const u8, style: []const u8 },
+        warn: struct { msg: []const u8, style: []const u8 },
+        err: struct { msg: []const u8, style: []const u8 },
+        createThread: struct { func_id: u32 },
+        threadJoin: struct { thread_id: u32 },
+        terminalInit: struct { element_id: []const u8 },
+        terminalWrite: struct { text: []const u8 },
+        fetch: struct { url: []const u8, method: []const u8, callback_id: u32 },
+        sleep: struct { ms: u32, func_id: u32 },
+        reloadWasm: struct {},
+        save: struct { key: []const u8, data: []const u8 },
+        load: struct { key: []const u8, callback_id: u32 },
+    };
+
+    pub fn call(args: Args) u32 {
+        return switch (args) {
+            .log => |a| wasm_op(0, 0, a.msg.ptr, @intCast(a.msg.len), a.style.ptr, @intCast(a.style.len)),
+            .warn => |a| wasm_op(1, 0, a.msg.ptr, @intCast(a.msg.len), a.style.ptr, @intCast(a.style.len)),
+            .err => |a| wasm_op(2, 0, a.msg.ptr, @intCast(a.msg.len), a.style.ptr, @intCast(a.style.len)),
+            .createThread => |a| wasm_op(3, a.func_id, null, 0, null, 0),
+            .threadJoin => |a| wasm_op(4, a.thread_id, null, 0, null, 0),
+            .terminalInit => |a| wasm_op(5, 0, a.element_id.ptr, @intCast(a.element_id.len), null, 0),
+            .terminalWrite => |a| wasm_op(6, 0, a.text.ptr, @intCast(a.text.len), null, 0),
+            .fetch => |a| wasm_op(7, a.callback_id, a.url.ptr, @intCast(a.url.len), a.method.ptr, @intCast(a.method.len)),
+            .sleep => |a| wasm_op(8, a.ms, null, a.func_id, null, 0),
+            .reloadWasm => wasm_op(9, 0, null, 0, null, 0),
+            .save => |a| wasm_op(10, 0, a.key.ptr, @intCast(a.key.len), a.data.ptr, @intCast(a.data.len)),
+            .load => |a| wasm_op(11, a.callback_id, a.key.ptr, @intCast(a.key.len), null, 0),
         };
     }
 };
 
+pub fn log(msg: []const u8, style: []const u8) void {
+    _ = WasmOp.call(.{ .log = .{ .msg = msg, .style = style } });
+}
+
+pub fn warn(msg: []const u8, style: []const u8) void {
+    _ = WasmOp.call(.{ .warn = .{ .msg = msg, .style = style } });
+}
+
+pub fn err(msg: []const u8, style: []const u8) void {
+    _ = WasmOp.call(.{ .err = .{ .msg = msg, .style = style } });
+}
+
 pub fn createThread(func_id: u32) u32 {
-    return WasmOp.createThread.invoke(.{ .func_id = func_id });
+    return WasmOp.call(.{ .createThread = .{ .func_id = func_id } });
 }
 
 pub fn threadJoin(thread_id: u32) void {
-    _ = WasmOp.threadJoin.invoke(.{ .thread_id = thread_id });
+    _ = WasmOp.call(.{ .threadJoin = .{ .thread_id = thread_id } });
 }
 
 pub fn terminalInit(element_id: []const u8) void {
-    _ = WasmOp.terminalInit.invoke(.{ .element_id = element_id });
+    _ = WasmOp.call(.{ .terminalInit = .{ .element_id = element_id } });
 }
 
 pub fn terminalWrite(text: []const u8) void {
-    _ = WasmOp.terminalWrite.invoke(.{ .text = text });
+    _ = WasmOp.call(.{ .terminalWrite = .{ .text = text } });
 }
 
 pub fn fetch(url: []const u8, method: []const u8, callback_id: u32) void {
-    _ = WasmOp.fetch.invoke(.{ .url = url, .method = method, .callback_id = callback_id });
+    _ = WasmOp.call(.{ .fetch = .{ .url = url, .method = method, .callback_id = callback_id } });
 }
 
 pub fn sleep(ms: u32, func_id: u32) void {
-    _ = WasmOp.sleep.invoke(.{ .ms = ms, .func_id = func_id });
+    _ = WasmOp.call(.{ .sleep = .{ .ms = ms, .func_id = func_id } });
 }
 
 pub fn reloadWasm() void {
-    _ = WasmOp.reloadWasm.invoke(.{});
+    _ = WasmOp.call(.{ .reloadWasm = .{} });
+}
+
+pub fn save(key: []const u8, data: []const u8) void {
+    _ = WasmOp.call(.{ .save = .{ .key = key, .data = data } });
+}
+
+pub fn load(key: []const u8, callback_id: u32) void {
+    _ = WasmOp.call(.{ .load = .{ .key = key, .callback_id = callback_id } });
 }
 
 pub const Element = struct {

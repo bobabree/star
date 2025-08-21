@@ -11,7 +11,7 @@ const Input = @import("Input.zig");
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
 const Process = @import("Process.zig");
-const WasmOp = @import("Wasm.zig").WasmOp;
+const Wasm = @import("Wasm.zig");
 
 const fileSys = Fs.fileSys;
 
@@ -541,11 +541,7 @@ pub const ShellCmd = enum {
         var proxy_url: [512]u8 = undefined;
         const full_url = Fmt.bufPrint(&proxy_url, "https://corsproxy.io/?{s}", .{url}) catch url;
 
-        _ = WasmOp.fetch.invoke(.{
-            .url = full_url,
-            .method = "GET",
-            .callback_id = 100,
-        });
+        Wasm.fetch(full_url, "GET", 100);
 
         IO.stdio.out.send("Downloading...\r\n");
     }
@@ -558,10 +554,7 @@ pub const ShellCmd = enum {
                 var key_buf: [32]u8 = undefined;
                 const key = Fmt.bufPrint(&key_buf, "file_{}", .{node.content_id}) catch return;
 
-                _ = WasmOp.load.invoke(.{
-                    .key = key,
-                    .callback_id = 200,
-                });
+                Wasm.load(key, 200);
             } else {
                 IO.stdio.out.send("cat: file is empty\r\n");
             }

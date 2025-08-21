@@ -17,49 +17,6 @@
         <js.lib />
         <wasm.lib />
         <script>
-            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-
-            const manifest = {
-                name: "Star Terminal",
-                short_name: "StarOS",
-                display: "standalone",
-                start_url: window.location.href, 
-                background_color: "#000",
-                theme_color: "#000",
-                icons: isLocal ? [
-                    {
-                        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%23000'/%3E%3Cpath d='M256 96 L296 211 L424 211 L323 291 L365 405 L256 320 L147 405 L189 291 L88 211 L216 211 Z' fill='none' stroke='%2300FF00' stroke-width='8'/%3E%3C/svg%3E",
-                        sizes: "any",
-                        type: "image/svg+xml",
-                        purpose: "any maskable"
-                    }
-                ] : [
-                    {
-                        src: "https://bobabree.github.io/star/icon-192.png",
-                        sizes: "192x192",
-                        type: "image/png"
-                    },
-                    {
-                        src: "https://bobabree.github.io/star/icon-512.png",
-                        sizes: "512x512",
-                        type: "image/png"
-                    }
-                ]
-            };
-            const manifestUrl = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest));
-            const link = document.createElement('link');
-            link.rel = 'manifest';
-            link.href = manifestUrl;
-            document.head.appendChild(link);
-
-            const appleIcon = document.createElement('link');
-            appleIcon.rel = 'apple-touch-icon';
-            appleIcon.href = isLocal 
-                ? "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Cpath d='M96 36 L111 79 L159 79 L121 109 L137 152 L96 120 L55 152 L71 109 L33 79 L81 79 Z' fill='none' stroke='%2300FF00' stroke-width='3'/%3E%3C/svg%3E"
-                : "https://bobabree.github.io/star/icon-192.png";
-            document.head.appendChild(appleIcon);
-        </script>
-        <script>
             let threads = [];
             let elements = [null, document.body];  // Preserve DOM
             
@@ -71,8 +28,8 @@
                 const getString = (ptr, len) => new TextDecoder().decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
 
                 const dom_op = isWorker ? () => 0 : (op, id, ptr1, len1, ptr2, len2) => {
-                    const s1 = len1 ? getString(ptr1, len1) : null;
-                    const s2 = len2 ? getString(ptr2, len2) : null;
+                    const s1 = getString(ptr1, len1);
+                    const s2 = getString(ptr2, len2);
                     
                     switch(op) {
                         case 0: // createElement
@@ -145,8 +102,8 @@
                 };
 
                 const wasm_op = (op, id, ptr1, len1, ptr2, len2) => {
-                    const s1 = len1 ? getString(ptr1, len1) : null;
-                    const s2 = len2 ? getString(ptr2, len2) : null;
+                    const s1 = getString(ptr1, len1);
+                    const s2 = getString(ptr2, len2);
                     
                     switch(op) {
                         case 0: // log
@@ -381,11 +338,12 @@
                                         if (data) {
                                             const bytes = new Uint8Array(data);
                                             
-                                            if (callback_id === 200) { // cmd command
+                                            if (callback_id === 200) { // cat command
                                                 const text = new TextDecoder().decode(bytes);
                                                 if (window.term) window.term.write(text + '\r\n');
                                                 wasmExports.cmd_callback();
-                                            } else {
+                                            } 
+                                            else {
                                                 const ptr = wasmExports.memory.buffer.byteLength - bytes.length;
                                                 new Uint8Array(wasmExports.memory.buffer).set(bytes, ptr);
                                                 wasmExports.fs_callback(callback_id, ptr, bytes.length);

@@ -5,7 +5,7 @@ const FixedBuffer = @import("FixedBuffer.zig").FixedBuffer;
 const Mem = @import("Mem.zig");
 const OS = @import("OS.zig");
 const Utf8Buffer = @import("Utf8Buffer.zig").Utf8Buffer;
-const WasmOp = @import("Wasm.zig").WasmOp;
+const Wasm = @import("Wasm.zig");
 
 pub const max_path_bytes = fs.max_path_bytes;
 pub const File = fs.File;
@@ -92,10 +92,7 @@ pub const FileSys = enum {
 
     pub fn run(comptime self: FileSys) void {
         if (self == .wasm) {
-            _ = WasmOp.load.invoke(.{
-                .key = PERSIST_KEY,
-                .callback_id = 0,
-            });
+            Wasm.load(PERSIST_KEY, 0);
         }
     }
 
@@ -284,34 +281,6 @@ pub const FileSys = enum {
     }
 
     const PERSIST_KEY = "star_fs";
-    const BinaryWriter = struct {
-        buffer: []u8,
-        pos: usize = 0,
-
-        fn writeU8(self: *@This(), value: u8) void {
-            Debug.assert(self.pos + 1 <= self.buffer.len);
-            self.buffer[self.pos] = value;
-            self.pos += 1;
-        }
-
-        fn writeU16(self: *@This(), value: u16) void {
-            Debug.assert(self.pos + 2 <= self.buffer.len);
-            @memcpy(self.buffer[self.pos..][0..2], Mem.asBytes(&value));
-            self.pos += 2;
-        }
-
-        fn writeBytes(self: *@This(), bytes: []const u8) void {
-            Debug.assert(self.pos + bytes.len <= self.buffer.len);
-            @memcpy(self.buffer[self.pos..][0..bytes.len], bytes);
-            self.pos += bytes.len;
-        }
-
-        fn writeStruct(self: *@This(), value: anytype) void {
-            const bytes = Mem.asBytes(&value);
-            self.writeBytes(bytes);
-        }
-    };
-
     fn serialize() [4096]u8 {
         var buffer: [4096]u8 = undefined;
         var writer = BinaryWriter{ .buffer = &buffer };
@@ -333,32 +302,6 @@ pub const FileSys = enum {
 
         return buffer;
     }
-
-    const BinaryReader = struct {
-        data: []const u8,
-        pos: usize = 0,
-
-        fn readU8(self: *@This()) u8 {
-            Debug.assert(self.pos + 1 <= self.data.len);
-            const value = self.data[self.pos];
-            self.pos += 1;
-            return value;
-        }
-
-        fn readU16(self: *@This()) u16 {
-            Debug.assert(self.pos + 2 <= self.data.len);
-            const value = Mem.bytesAsValue(u16, self.data[self.pos..][0..2]).*;
-            self.pos += 2;
-            return value;
-        }
-
-        fn readStruct(self: *@This(), comptime T: type) T {
-            Debug.assert(self.pos + @sizeOf(T) <= self.data.len);
-            const value = Mem.bytesAsValue(T, self.data[self.pos..][0..@sizeOf(T)]).*;
-            self.pos += @sizeOf(T);
-            return value;
-        }
-    };
 
     fn deserialize(comptime _: FileSys, data: []const u8) void {
         if (data.len < 3) return;
@@ -382,10 +325,7 @@ pub const FileSys = enum {
         if (!OS.is_wasm) return;
         const buffer = serialize();
         const len = Mem.bytesAsValue(u16, buffer[0..2]).*;
-        _ = WasmOp.save.invoke(.{
-            .key = PERSIST_KEY,
-            .data = buffer[0..len],
-        });
+        _ = Wasm.save(PERSIST_KEY, buffer[0..len]);
     }
 
     pub fn onLoad(comptime _: FileSys, callback: *const fn () void) void {
@@ -416,3 +356,57 @@ export fn fs_callback(callback_id: u32, ptr: [*]const u8, len: u32) void {
         callback();
     }
 }
+
+pub const BinaryWriter = struct {
+    buffer: []u8,
+    pos: usize = 0,
+
+    pub fn writeU8(self: *@This(), value: u8) void {
+        Debug.assert(self.pos + 1 <= self.buffer.len);
+        self.buffer[self.pos] = value;
+        self.pos += 1;
+    }
+
+    pub fn writeU16(self: *@This(), value: u16) void {
+        Debug.assert(self.pos + 2 <= self.buffer.len);
+        @memcpy(self.buffer[self.pos..][0..2], Mem.asBytes(&value));
+        self.pos += 2;
+    }
+
+    pub fn writeBytes(self: *@This(), bytes: []const u8) void {
+        Debug.assert(self.pos + bytes.len <= self.buffer.len);
+        @memcpy(self.buffer[self.pos..][0..bytes.len], bytes);
+        self.pos += bytes.len;
+    }
+
+    pub fn writeStruct(self: *@This(), value: anytype) void {
+        const bytes = Mem.asBytes(&value);
+        self.writeBytes(bytes);
+    }
+};
+
+pub const BinaryReader = struct {
+    data: []const u8,
+    pos: usize = 0,
+
+    pub fn readU8(self: *@This()) u8 {
+        Debug.assert(self.pos + 1 <= self.data.len);
+        const value = self.data[self.pos];
+        self.pos += 1;
+        return value;
+    }
+
+    pub fn readU16(self: *@This()) u16 {
+        Debug.assert(self.pos + 2 <= self.data.len);
+        const value = Mem.bytesAsValue(u16, self.data[self.pos..][0..2]).*;
+        self.pos += 2;
+        return value;
+    }
+
+    pub fn readStruct(self: *@This(), comptime T: type) T {
+        Debug.assert(self.pos + @sizeOf(T) <= self.data.len);
+        const value = Mem.bytesAsValue(T, self.data[self.pos..][0..@sizeOf(T)]).*;
+        self.pos += @sizeOf(T);
+        return value;
+    }
+};
